@@ -54,6 +54,32 @@ jobs:
       - name: the tool accepts no caller headers
         run: ./scripts/no-caller-headers.sh
 
+  # The image is built on every PR and pushed nowhere.
+  #
+  # A Dockerfile that only ever runs on a release tag is a Dockerfile that
+  # breaks on a release tag, which is the worst moment to find out. This one
+  # builds the same file the release workflow builds and throws the result
+  # away, so the deployment artifact is proven by the same run that proves the
+  # code. Single platform on purpose: cross-building arm64 here would double
+  # the time to answer a question amd64 already answers.
+  #
+  # COST: nothing. Standard runner, public repository, no registry write.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: the image builds
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          build-args: |
+            VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   security:
     runs-on: ubuntu-latest
     steps:

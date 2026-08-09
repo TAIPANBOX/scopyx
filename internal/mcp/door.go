@@ -21,19 +21,64 @@ const ClientKeyHeader = "X-Scopyx-Key"
 // loopback, which RefuseOpenBind enforces.
 type Keys struct {
 	accepted []string
+	// identity maps a credential to the agent it belongs to. A credential with
+	// no entry authenticates and names nobody.
+	identity map[string]string
 }
 
-// ParseKeys reads `key1,key2,...`. Blank entries are dropped rather than
-// accepted as an empty credential, which would let a caller sending no header
-// match.
+// ParseKeys reads `key1,key2,...`, and optionally `key=agent://domain/name`.
+//
+// # WHY THE CREDENTIAL CARRIES THE IDENTITY
+//
+// Invariant 6: identity comes from an authenticated caller and never from a
+// claim. The only authenticated fact this door has is which credential was
+// presented, so that is what an identity may be derived from. A header naming
+// the agent would be the caller telling us who it is, and a policy carrying
+// `deny_if_unattested` would then be satisfied by a string the caller wrote for
+// itself.
+//
+// A credential given without an identity still authenticates. It just cannot be
+// spoken for: every fetch through it reaches the policy plane with no subject,
+// which `policy.Client` turns into unreachable and `decide` turns into a
+// refusal that says so. That is the fail-closed path working rather than a
+// special case, and it is why this returns no error for the bare form.
+//
+// Blank entries are dropped rather than accepted as an empty credential, which
+// would let a caller sending no header match.
 func ParseKeys(raw string) Keys {
 	var out []string
-	for _, k := range strings.Split(raw, ",") {
-		if k = strings.TrimSpace(k); k != "" {
-			out = append(out, k)
+	ids := map[string]string{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// SplitN, not Split: an identity is a URI and contains no `=` today,
+		// but a value that grew one would otherwise be silently cut in half.
+		key, id, found := strings.Cut(entry, "=")
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out = append(out, key)
+		if found {
+			if id = strings.TrimSpace(id); id != "" {
+				ids[key] = id
+			}
 		}
 	}
-	return Keys{accepted: out}
+	return Keys{accepted: out, identity: ids}
+}
+
+// Identity is the agent a credential belongs to, or empty.
+//
+// Empty is a real answer and not an error: see ParseKeys. The caller must not
+// substitute anything for it.
+func (k Keys) Identity(presented string) string {
+	if !k.Allow(presented) {
+		return ""
+	}
+	return k.identity[presented]
 }
 
 // Configured reports whether any credential is required.
