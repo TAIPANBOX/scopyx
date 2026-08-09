@@ -13,6 +13,7 @@ package fetch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"net/url"
 
@@ -76,48 +77,100 @@ type Result struct {
 // reaches the operator's own service, so it never appears in their bill for it
 // either.
 func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
-	u, err := url.Parse(req.URL)
-	if err != nil {
-		return Result{}, &Refusal{Decision: decide.Decision{
-			Verdict: decide.DenyScheme,
-			Reason:  "the URL could not be parsed: " + err.Error(),
-		}}
-	}
+	current := req
+	var hops []string
 
-	// Resolved at the moment of the fetch, never from anything remembered.
-	// Re-resolving here is what closes DNS rebinding: an address looked up
-	// minutes ago would satisfy the check and the fetch would reach something
-	// else.
-	addrs, err := d.Resolver.Resolve(ctx, u.Hostname())
-	if err != nil {
-		return Result{}, &Refusal{Decision: decide.Decision{
-			Verdict: decide.DenyAddress,
-			Reason:  "the host could not be resolved: " + err.Error(),
-		}}
-	}
+	for hop := 0; ; hop++ {
+		u, err := url.Parse(current.URL)
+		if err != nil {
+			return Result{}, &Refusal{Decision: decide.Decision{
+				Verdict: decide.DenyScheme,
+				Reason:  "the URL could not be parsed: " + err.Error(),
+			}}
+		}
 
-	answer := d.Memo.Host(ctx, u.Hostname())
+		// Resolved at the moment of the fetch, never from anything remembered,
+		// and re-resolved on EVERY hop. Re-resolving is what closes DNS
+		// rebinding: an address looked up minutes ago would satisfy the check
+		// and the fetch would reach something else. A redirect target resolved
+		// from the first hop's answer would be the same bug with extra steps.
+		addrs, err := d.Resolver.Resolve(ctx, u.Hostname())
+		if err != nil {
+			return Result{}, &Refusal{Decision: decide.Decision{
+				Verdict: decide.DenyAddress,
+				Reason:  "the host could not be resolved: " + err.Error(),
+			}}
+		}
 
-	if dec := decide.Destination(req.URL, addrs, answer.PolicyAnswer); !dec.Verdict.Allowed() {
-		return Result{}, &Refusal{Decision: dec}
-	}
+		answer := d.Memo.Host(ctx, u.Hostname())
 
-	res, err := d.Backend.Fetch(ctx, req)
-	if err != nil {
-		return Result{}, err
-	}
+		// hop 0 is the caller's own URL; every later one is a destination
+		// nobody asked for, which is why it is decided rather than followed.
+		var dec decide.Decision
+		if hop == 0 {
+			dec = decide.Destination(current.URL, addrs, answer.PolicyAnswer)
+		} else {
+			dec = decide.Redirect(hop, current.URL, addrs, answer.PolicyAnswer, d.Limits)
+		}
+		if !dec.Verdict.Allowed() {
+			return Result{}, &Refusal{Decision: dec}
+		}
 
-	f := fidelityFor(d.Backend, res)
-	if err := f.Check(); err != nil {
-		return Result{}, err
-	}
+		res, err := d.Backend.Fetch(ctx, current)
+		if err != nil {
+			return Result{}, err
+		}
 
-	final := res.FinalURL
-	if final == "" {
-		final = req.URL
+		if res.RedirectTo == "" {
+			if len(hops) > 0 {
+				// Only when this loop followed them. A backend that follows
+				// internally reports its own and must not have them overwritten
+				// by an empty list.
+				res.Redirects = hops
+			}
+			f := fidelityFor(d.Backend, res)
+			if err := f.Check(); err != nil {
+				return Result{}, err
+			}
+			final := res.FinalURL
+			if final == "" {
+				final = current.URL
+			}
+			return Result{Body: res.Body, FinalURL: final, Fidelity: f}, nil
+		}
+
+		// Resolved against the URL just fetched, so a relative Location goes to
+		// the host that sent it rather than being parsed as a bare path and
+		// refused as a scheme.
+		target, err := u.Parse(res.RedirectTo)
+		if err != nil {
+			return Result{}, &Refusal{Decision: decide.Decision{
+				Verdict: decide.DenyScheme,
+				Reason:  "the redirect target could not be parsed: " + err.Error(),
+			}}
+		}
+		if hop+1 > absoluteMaxRedirects {
+			return Result{}, &Refusal{Decision: decide.Decision{
+				Verdict: decide.DenyRedirectDepth,
+				Reason: fmt.Sprintf(
+					"the redirect chain passed %d hops, which this plane refuses "+
+						"regardless of configured limits", absoluteMaxRedirects),
+			}}
+		}
+		hops = append(hops, target.String())
+		current.URL = target.String()
 	}
-	return Result{Body: res.Body, FinalURL: final, Fidelity: f}, nil
 }
+
+// absoluteMaxRedirects is a liveness bound, not a policy one.
+//
+// `decide.Limits.MaxRedirects` is the policy bound and a zero there legally
+// means "no bound", which is fine for a pure function and is a hang in a loop:
+// two servers pointing at each other would spin here forever, and a fetch that
+// never returns is worse than one that is refused, because nothing reports it.
+// So the loop keeps its own ceiling, and says plainly that this is the one that
+// stopped it rather than blaming a limit the operator set.
+const absoluteMaxRedirects = 32
 
 // fidelityFor assembles the counts, and leaves them nil when the backend did
 // not report subresources at all.
