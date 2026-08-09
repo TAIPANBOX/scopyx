@@ -7,8 +7,13 @@ name: ci
 # which is the estate's standing rule after Actions once burned a free
 # private-repo pool nobody knew was metered.
 
+# Push on main and pull requests only. `on: push` alone fires a second,
+# identical run for every commit that is also on an open PR, which is twice the
+# runner time for one answer. Free on a public repository and still waste, and
+# waste on a shared free tier is queue time somebody else pays in.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
