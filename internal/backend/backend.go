@@ -52,6 +52,17 @@ type Result struct {
 	Subresources []Subresource
 	Redirects    []string
 	TruncatedBy  decide.Truncation
+
+	// RedirectTo is where a hop points, for a backend that reports redirects
+	// instead of following them. Empty means either "not a redirect" or "this
+	// backend followed it itself".
+	//
+	// The two are collapsed on purpose. A backend that follows internally has
+	// already made a request this plane did not decide, and there is nothing
+	// left for a distinction here to protect: the honest report of that is its
+	// Enforcement value, which says navigation_only, and not a field suggesting
+	// the hop was available for review when it was not.
+	RedirectTo string
 }
 
 // Backend performs a fetch that has already been decided.
