@@ -94,7 +94,14 @@ an absent invariant.
    that refuses authenticated sessions acquires them one header at a time.
    Authenticated fetching, where it is genuinely needed, belongs to the
    backend and its own credential store.
-   *(gate: `scripts/no-caller-headers.sh`)*
+   *(gate: `scripts/no-caller-headers.sh`, verified by planting a struct with
+   a `json:"headers"` map, which it names and refuses; plus
+   `TestNoToolAcceptsAHeaderCookieOrCredential` and
+   `TestEveryToolRefusesUnknownArgumentsRatherThanIgnoringThem` on the
+   published schemas. The two cover different surfaces: the test reads what
+   this package publishes, the script reads the whole tree, because a second
+   surface is how the field comes back. The script is an anchor and not a
+   compiler, and a field called `extra` holding a header map would pass it.)*
 
 4. **No fetch context is reused across two fetches.** Never a rendering
    context, a cookie jar, a cache or a storage partition, even for the same

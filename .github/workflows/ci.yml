@@ -1,0 +1,63 @@
+name: ci
+
+# COST: NOTHING. This repository is PUBLIC, and GitHub Actions minutes on
+# standard runners are free for public repositories. There is no matrix, no
+# larger runner, no self-hosted runner and no paid service here, deliberately.
+# Adding any of those is a spending decision and needs saying out loud first,
+# which is the estate's standing rule after Actions once burned a free
+# private-repo pool nobody knew was metered.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Matches `toolchain` in go.mod. These two disagreeing is not
+          # cosmetic: setup-go pins GOTOOLCHAIN=local, so a mismatch stops
+          # being a silent extra download and becomes a hard failure.
+          go-version: "1.26.5"
+          cache: true
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+      # The architectural gates. They run here as well as locally because a
+      # gate that only runs on one machine is a gate that does not run.
+      - name: the tool accepts no caller headers
+        run: ./scripts/no-caller-headers.sh
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+          cache: true
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
