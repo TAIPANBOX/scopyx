@@ -1,2 +1,7 @@
 /scopyx
 *.ndjson
+
+# macOS Finder metadata. Reached this repository on 2026-08-10 through a
+# `git add -A`, hours after the same slip was fixed in heraldyx. The habit is
+# the problem, so the fix is a file rather than a resolution.
+.DS_Store
