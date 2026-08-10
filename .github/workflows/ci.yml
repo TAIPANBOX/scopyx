@@ -46,7 +46,31 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # A browser, so the rendering backend is exercised rather than skipped.
+      #
+      # Without this the chromium cases skip, and a skipped test and a passing
+      # test look identical in a summary line. SCOPYX_REQUIRE_CHROMIUM below
+      # turns that skip into a failure, so the day this step breaks, CI says so
+      # instead of going quietly green over an untested backend.
+      - name: a browser for the rendering backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-browser || sudo snap install chromium
+          command -v chromium || command -v chromium-browser
+
       - name: go test -race
+        env:
+          # Fail rather than skip when there is no browser. See above.
+          SCOPYX_REQUIRE_CHROMIUM: "1"
+          # CI ONLY, and never the shipped default.
+          #
+          # Ubuntu runners restrict the unprivileged user namespaces Chrome's
+          # sandbox needs, so the browser refuses to start. The product does
+          # NOT set this: an operator gets an error naming both ways out, and
+          # the better one is to run as a user whose namespaces work, which
+          # keeps the sandbox. Here the isolation is the runner itself, which
+          # is destroyed after the job.
+          SCOPYX_CHROMIUM_NO_SANDBOX: "1"
         run: go test -race ./...
 
       # The architectural gates. They run here as well as locally because a

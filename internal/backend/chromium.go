@@ -82,6 +82,10 @@ type Chromium struct {
 
 	// Dial opens a socket to an already-checked address. Nil is ordinary.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+
+	// NoSandbox turns off the browser's own renderer sandbox. Off by default,
+	// and never set to work around an error. See chromeArgs.
+	NoSandbox bool
 }
 
 // ErrNoBrowser is a chromium backend with no browser to drive.
@@ -152,18 +156,30 @@ func (c *Chromium) Fetch(ctx context.Context, req Request) (Result, error) {
 	}
 	defer os.RemoveAll(profile)
 
-	conn, err := cdp.Launch(ctx, c.Exe, chromeArgs(profile, proxyAddr)...)
+	conn, err := cdp.Launch(ctx, c.Exe, chromeArgs(profile, proxyAddr, c.NoSandbox)...)
 	if err != nil {
 		return Result{}, err
 	}
 	defer conn.Close()
 
-	return c.drive(ctx, conn, px, req)
+	res, err := c.drive(ctx, conn, px, req)
+	if err != nil {
+		// The browser's own words, when it had any. "the browser closed the
+		// connection" describes the symptom and hides the sentence that says
+		// why, and the why is usually one line: a missing shared library, a
+		// sandbox that cannot initialise in a container, a profile it cannot
+		// write.
+		if said := conn.Stderr(); said != "" {
+			return res, fmt.Errorf("%w. The browser said: %s.%s",
+				err, lastLines(said, 3), sandboxAdvice(said))
+		}
+	}
+	return res, err
 }
 
 // chromeArgs is the launch, and every flag here is load-bearing.
-func chromeArgs(profile, proxyAddr string) []string {
-	return []string{
+func chromeArgs(profile, proxyAddr string, noSandbox bool) []string {
+	args := []string{
 		"--headless=new",
 		"--no-first-run",
 		"--no-default-browser-check",
@@ -191,6 +207,36 @@ func chromeArgs(profile, proxyAddr string) []string {
 		"--mute-audio",
 		"--window-size=1280,900",
 	}
+	if noSandbox {
+		// NEVER implicit, and never a repair for an error message.
+		//
+		// This turns off the browser's own renderer sandbox, which is the thing
+		// standing between a hostile page and the process rendering it. That
+		// page is attacker-controlled by definition: this plane exists because
+		// agents read pages that tell them what to do next.
+		//
+		// It is here because a container commonly cannot give Chrome the user
+		// namespaces its sandbox needs, and an operator who has read what it
+		// costs may still decide the isolation they want is the container. The
+		// same shape as SCOPYX_ALLOW_OPEN_BIND: a deliberate weakening, named,
+		// opt-in, and said out loud at every boot.
+		args = append(args, "--no-sandbox")
+	}
+	return args
+}
+
+// sandboxAdvice turns the browser's own complaint into the two ways out.
+//
+// Named separately because the tempting fix for "running as root without
+// --no-sandbox is not supported" is to add the flag, and the better fix is
+// usually not to run as root.
+func sandboxAdvice(said string) string {
+	if !strings.Contains(said, "--no-sandbox") && !strings.Contains(said, "sandbox") {
+		return ""
+	}
+	return " This is the browser's sandbox, not scopyx. Run the container as a " +
+		"non-root user with the namespaces Chrome needs, which keeps the sandbox, or set " +
+		"SCOPYX_CHROMIUM_NO_SANDBOX=1, which turns it off and is a decision rather than a fix."
 }
 
 // decideHost is what the proxy asks. It resolves and defers to Allow.
@@ -439,4 +485,13 @@ func mergeCounts(seen []Subresource, px *browserproxy.Proxy) []Subresource {
 		out = append(out, Subresource{URL: s.URL, Status: s.Status, Blocked: s.Blocked, Failed: s.Failed})
 	}
 	return out
+}
+
+// lastLines keeps the tail, which is where a browser puts its reason.
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " | ")
 }

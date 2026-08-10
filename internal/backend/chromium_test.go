@@ -96,6 +96,10 @@ func newChromium(t *testing.T) *Chromium {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A container cannot always give Chrome the namespaces its sandbox needs,
+	// and CI is a container. Set here rather than defaulted in the product:
+	// the test opts in, the shipped default does not.
+	c.NoSandbox = os.Getenv("SCOPYX_CHROMIUM_NO_SANDBOX") != ""
 	return c
 }
 
@@ -283,7 +287,13 @@ func TestTheLaunchRefusesADebuggingPort(t *testing.T) {
 // developer's machine is every other service they run. The launch closes it,
 // and this reads the flags rather than trusting the comment beside them.
 func TestTheLaunchClosesChromesOwnProxyBypass(t *testing.T) {
-	joined := strings.Join(chromeArgs("/tmp/profile", "127.0.0.1:1234"), " ")
+	joined := strings.Join(chromeArgs("/tmp/profile", "127.0.0.1:1234", false), " ")
+	if strings.Contains(joined, "--no-sandbox") {
+		t.Error("the browser's own sandbox must never be off by default")
+	}
+	if !strings.Contains(strings.Join(chromeArgs("/tmp/p", "127.0.0.1:1", true), " "), "--no-sandbox") {
+		t.Error("the opt-in must actually pass the flag")
+	}
 	for _, want := range []string{
 		"--proxy-server=http://127.0.0.1:1234",
 		"--proxy-bypass-list=<-loopback>",

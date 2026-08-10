@@ -34,6 +34,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -64,9 +65,10 @@ func (e *ProtocolError) Error() string {
 
 // Conn is one browser process's protocol connection.
 type Conn struct {
-	w   io.WriteCloser
-	r   io.ReadCloser
-	cmd *exec.Cmd
+	w      io.WriteCloser
+	r      io.ReadCloser
+	cmd    *exec.Cmd
+	stderr *ring
 
 	next atomic.Int64
 
@@ -106,6 +108,16 @@ func Launch(ctx context.Context, exe string, args ...string) (*Conn, error) {
 	cmd := exec.CommandContext(ctx, exe, append([]string{"--remote-debugging-pipe"}, args...)...)
 	// fd 3 is what the browser reads, fd 4 is what it writes.
 	cmd.ExtraFiles = []*os.File{toChild, fromChild}
+
+	// The browser's own complaints, kept.
+	//
+	// Without this a browser that refuses to start reports as "the browser
+	// closed the connection", which describes the symptom and hides the
+	// sentence that says why: a missing shared library, a sandbox that cannot
+	// initialise, a profile it cannot write. Bounded, because a chatty build
+	// should not become a memory leak in the thing doing the governing.
+	tail := &ring{max: 8 << 10}
+	cmd.Stderr = tail
 	if err := cmd.Start(); err != nil {
 		toChild.Close()
 		weWrite.Close()
@@ -118,7 +130,7 @@ func Launch(ctx context.Context, exe string, args ...string) (*Conn, error) {
 	toChild.Close()
 	fromChild.Close()
 
-	c := &Conn{w: weWrite, r: weRead, cmd: cmd, waiting: map[int64]chan Message{}}
+	c := &Conn{w: weWrite, r: weRead, cmd: cmd, stderr: tail, waiting: map[int64]chan Message{}}
 	go c.read()
 	return c, nil
 }
@@ -256,6 +268,37 @@ func (c *Conn) Send(sessionID, method string, params any) error {
 	}
 	_, err = c.w.Write(append(body, 0))
 	return err
+}
+
+// Stderr reports what the browser said, for an error that needs it.
+func (c *Conn) Stderr() string {
+	if c.stderr == nil {
+		return ""
+	}
+	return c.stderr.String()
+}
+
+// ring keeps the last max bytes written to it.
+type ring struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func (r *ring) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.buf = append(r.buf, p...)
+	if len(r.buf) > r.max {
+		r.buf = r.buf[len(r.buf)-r.max:]
+	}
+	return len(p), nil
+}
+
+func (r *ring) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.TrimSpace(string(r.buf))
 }
 
 // Close ends the protocol connection and waits for the browser to exit.

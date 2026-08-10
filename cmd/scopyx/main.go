@@ -266,10 +266,15 @@ func chooseBackend(hc *http.Client) (backend.Backend, error) {
 		// without being asked. Refused at startup when there is none, rather
 		// than at the first fetch, so the error names the missing browser
 		// instead of describing a network problem.
-		return backend.NewChromium(
+		ch, err := backend.NewChromium(
 			os.Getenv("SCOPYX_CHROMIUM"),
 			envInt("SCOPYX_MAX_BYTES", defaultMaxBodyBytes),
 			defaultBrowserTimeout)
+		if err != nil {
+			return nil, err
+		}
+		ch.NoSandbox = mcp.TruthyEnv(os.Getenv("SCOPYX_CHROMIUM_NO_SANDBOX"))
+		return ch, nil
 	default:
 		return nil, fmt.Errorf("SCOPYX_BACKEND=%q is not a backend this build has. "+
 			"Known: passthrough (the default, no vendor), external (your own fetching "+
