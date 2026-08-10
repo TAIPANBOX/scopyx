@@ -160,8 +160,21 @@ which of the two guarantees was in force, and never claims the stronger one.
 **`chromium`** drives a browser you installed. It runs the page's JavaScript,
 so a document assembled in the browser arrives assembled, and it is the only
 backend for which `per_request` is a measurement rather than a definition:
-`passthrough` is per-request because it makes exactly one request, and a page
-is a document plus forty others.
+`passthrough` is per-request because it makes exactly one request.
+
+How many other requests a page makes, measured through this backend on an EC2
+node on 2026-08-10, every one of them decided:
+
+| page | document | other requests |
+|---|---|---|
+| example.com | 544 B | 1 |
+| en.wikipedia.org/wiki/Kubernetes | 787 KB | 40 |
+| bbc.com/news | 328 KB | 113 |
+| github.com/TAIPANBOX/scopyx | 365 KB | 144 |
+| nytimes.com | 1.4 MB | **343** |
+
+Peak memory for the whole pod across those, read from the cgroup's own
+high-water mark: **517 MiB**.
 
 Nothing is bundled into the default image, and nothing is downloaded at run
 time. A missing browser is refused at startup with a message about the browser
@@ -169,15 +182,23 @@ rather than at the first fetch with a message about the network.
 
 ### Two images, and the ratio is why
 
-| tag | what is in it | size |
-|---|---|---|
-| `ghcr.io/taipanbox/scopyx:v0.1.0` | the service, distroless, non-root | **15.4 MB** |
-| `ghcr.io/taipanbox/scopyx:v0.1.0-chromium` | the same service plus Chromium | **1.03 GB** |
+| tag | what is in it | you download | on disk |
+|---|---|---|---|
+| `ghcr.io/taipanbox/scopyx:v0.1.2` | the service, distroless, non-root | **3.5 MB** | 15.4 MB |
+| `ghcr.io/taipanbox/scopyx:v0.1.2-chromium` | the same service plus Chromium | **267 MB** | 1.03 GB |
 
-Measured 2026-08-10 with `docker image ls`. Sixty-seven times the size is the
-reason the browser is a separate tag rather than the default: a governance
-component that put a browser on every box whether or not the operator wanted
-rendering would be answering a question nobody asked.
+Two numbers because they answer different questions, and stating only one is
+how a size claim misleads. The transfer is what a node pulls; the disk figure
+is what it then keeps. Measured 2026-08-10, the first with `k3s ctr images ls`
+on an EC2 node and the second with `docker image ls`.
+
+Seventy-six times the transfer is the reason the browser is a separate tag
+rather than the default: a governance component that put a browser on every box
+whether or not the operator wanted rendering would be answering a question
+nobody asked.
+
+On that node the pod was Running **48 seconds** after `kubectl apply`, pull
+included.
 
 ### The sandbox in a container: you are choosing which one to keep
 
@@ -187,11 +208,15 @@ were measured on 2026-08-10, and both render:
 
 ```bash
 # keep Chrome's sandbox, relax the container's syscall filter
-docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v0.1.0-chromium
+docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v0.1.2-chromium
 
 # keep the container's syscall filter, turn Chrome's sandbox off
-docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v0.1.0-chromium
+docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v0.1.2-chromium
 ```
+
+On Kubernetes the choice is often already made: a namespace at PodSecurity
+`restricted` forbids `seccompProfile: Unconfined` outright, so the browser runs
+without its own sandbox and the pod's other confinement carries the line.
 
 **For this component the first is the better trade, and the reason is the
 product's own subject.** Chrome's sandbox is what stands between a hostile page

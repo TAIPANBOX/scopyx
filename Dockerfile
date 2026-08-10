@@ -100,6 +100,38 @@ COPY --from=build /out/scopyx /usr/local/bin/service
 # fetch with a message about the network.
 ENV SCOPYX_CHROMIUM=/usr/bin/chromium
 
+# HOME, and without it v0.1.1 could not render on a real node at all.
+#
+# `useradd -M` creates no home directory, so HOME pointed at /home/nonroot,
+# which does not exist. Pointing HOME at a directory that is not there is wrong
+# in any container, and in a k3s pod on EC2 it was fatal: Chromium died before
+# opening anything, with
+#
+#   chrome_crashpad_handler: --database is required
+#   Trace/breakpoint trap (core dumped)
+#
+# which says nothing about a home directory.
+#
+# WHAT IS MEASURED AND WHAT IS NOT, because the difference matters here.
+#
+# Measured on an EC2 node, 2026-08-10: with HOME=/home/nonroot every fetch
+# failed exactly as above; with HOME=/tmp the same pod rendered pages of up to
+# 343 subresources. That is the fix, and it is the fix on the machine that
+# failed.
+#
+# NOT reproduced locally. The same amd64 image under `docker run` renders with
+# the old HOME, with a read-only root filesystem, with all capabilities
+# dropped, with no-new-privileges, and as uid 65532. So the precise trigger is
+# something else about that node's runtime, and it is not isolated. The fix
+# stands on its own regardless: HOME must name a directory that exists and is
+# writable.
+#
+# /tmp is the one path guaranteed writable in every deployment of this image: a
+# tmpfs in compose, an emptyDir in Kubernetes under a read-only root
+# filesystem, and the container's own writable layer under a plain `docker
+# run`.
+ENV HOME=/tmp
+
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/service"]
 
