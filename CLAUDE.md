@@ -163,7 +163,13 @@ an absent invariant.
 
 9. **This plane governs evasion and never supplies it.** No stealth, no CAPTCHA
    solving, no TLS-fingerprint matching, no bulk crawl and no image harvesting.
-   `robots.txt` is honoured by default.
+   **`robots.txt` is NOT honoured yet**, and this line said it was until
+   2026-08-10. Nothing in the Go tree reads it, and the claim reached the
+   README and the public site before anybody grepped for it. It is worth
+   having and it is not built: the honest state is that this plane refuses the
+   things above by construction and asks a site's preference not at all.
+   *(not enforced, and the gate to write is a grep for the claim beside a grep
+   for an implementation, which is the shape that would have caught it)*
 
    Two of those are positioning and two are law-shaped. The estate is defensive
    tooling for an operator governing their own agents, and a component that
