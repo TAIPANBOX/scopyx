@@ -31,6 +31,7 @@ import (
 	"github.com/TAIPANBOX/scopyx/internal/decide"
 	"github.com/TAIPANBOX/scopyx/internal/fetch"
 	"github.com/TAIPANBOX/scopyx/internal/mcp"
+	"github.com/TAIPANBOX/scopyx/internal/pin"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
 	"github.com/TAIPANBOX/scopyx/internal/record"
 	"github.com/TAIPANBOX/scopyx/internal/robots"
@@ -89,7 +90,20 @@ func run(log *slog.Logger) error {
 	}
 	pdp := policy.New(pdpURL, os.Getenv("SCOPYX_WARDRYX_KEY"), defaultPolicyTimeout)
 
-	back, err := chooseBackend()
+	// ONE pinned client, shared by everything that reaches the open web.
+	//
+	// Shared on purpose. Two clients would be two dialers, and a dialer that
+	// resolves a name for itself is the hole this closes: `internal/fetch`
+	// checks addresses, and anything below it that looks the name up again is
+	// deciding about one host and connecting to another.
+	//
+	// The policy client is deliberately NOT on this transport. wardryx is an
+	// internal service that no fetch decision covers, so a pinned dialer would
+	// refuse to reach it and this plane would fail closed against its own
+	// control plane. Different direction, different rules.
+	pinned := pin.Client(defaultBackendTimeout)
+
+	back, err := chooseBackend(pinned)
 	if err != nil {
 		return err
 	}
@@ -139,20 +153,17 @@ func run(log *slog.Logger) error {
 		},
 		cap:      newHourlyCap(perHour),
 		resolver: systemResolver{},
-		// nil client, so robots gets its own with a bounded timeout.
+		// The SAME pinned transport the backend uses, and this is what closed
+		// the hole invariant 9 carried as debt for a day.
 		//
-		// WHAT THIS DOES NOT CLOSE, written down rather than left to be found.
-		// The robots.txt request resolves the host again, independently of the
-		// lookup the decision was made on. A name that answered with a public
-		// address for the decision and a private one microseconds later would
-		// be fetched by this client without the address checks seeing it. The
-		// window is small and it is real.
-		//
-		// It is not closed here because closing it properly means pinning the
-		// dialer to the address `internal/fetch` already resolved, which is a
-		// change to how every backend is constructed rather than a line in
-		// this one. Recorded in CLAUDE.md as debt rather than fixed badly.
-		robots: robots.New(robotsMode, 0, nil),
+		// A robots.txt fetch is a fetch. Given its own client it would resolve
+		// the host a second time, independently of the lookup the decision was
+		// made on, and a name that answered publicly for the decision and
+		// privately a microsecond later would be reached without the address
+		// checks seeing it. `internal/pin` makes the dialer refuse any host the
+		// context does not carry, so this client cannot reach anywhere
+		// `internal/fetch` has not already resolved and decided about.
+		robots: robots.New(robotsMode, 0, pinned),
 	}
 
 	srv := &http.Server{
@@ -210,17 +221,24 @@ func run(log *slog.Logger) error {
 //
 // The default is the one that needs no vendor, no account and no token, so a
 // deployment is governed on the day it is installed.
-func chooseBackend() (backend.Backend, error) {
+func chooseBackend(hc *http.Client) (backend.Backend, error) {
 	switch name := env("SCOPYX_BACKEND", "passthrough"); name {
 	case "passthrough":
-		return backend.NewPassthrough(
-			envInt("SCOPYX_MAX_BYTES", defaultMaxBodyBytes), defaultBackendTimeout), nil
+		p := backend.NewPassthrough(
+			envInt("SCOPYX_MAX_BYTES", defaultMaxBodyBytes), defaultBackendTimeout)
+		p.HTTP = hc
+		return p, nil
 	case "external":
 		endpoint := os.Getenv("SCOPYX_EXTERNAL_ENDPOINT")
 		if endpoint == "" {
 			return nil, errors.New("SCOPYX_BACKEND=external needs SCOPYX_EXTERNAL_ENDPOINT, " +
 				"the URL of the fetching service you already run")
 		}
+		// NOT pinned, and the reason is worth reading. `external` calls a
+		// service the operator already runs, at an address of their choosing;
+		// no fetch decision covers THAT host, so a pinned dialer would refuse
+		// it. What the vendor then reaches is outside this process entirely,
+		// which is exactly why this backend reports `navigation_only`.
 		return backend.NewExternal(
 			env("SCOPYX_EXTERNAL_LABEL", "service"),
 			endpoint,
