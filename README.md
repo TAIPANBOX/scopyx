@@ -70,7 +70,7 @@ docker run --rm \
   -e SCOPYX_EVENTS=/var/lib/scopyx/events.ndjson \
   -v scopyx-events:/var/lib/scopyx \
   -p 4300:4300 \
-  ghcr.io/taipanbox/scopyx:v0.1.0
+  ghcr.io/taipanbox/scopyx:v0.1.2
 ```
 
 Then point an MCP client at `http://localhost:4300` with the header

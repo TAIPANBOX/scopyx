@@ -1,6 +1,6 @@
 # Build and publish the container image to GitHub Container Registry.
 #
-#   ghcr.io/<owner>/scopyx:v0.1.0     what a deployment pins
+#   ghcr.io/<owner>/scopyx:v0.1.2     what a deployment pins
 #   ghcr.io/<owner>/scopyx:sha-abc123  what a bisect points at
 #
 # **Immutable versions, no moving tag.** There is deliberately no `:latest` and
