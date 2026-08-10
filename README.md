@@ -1,4 +1,20 @@
-# scopyx
+<div align="center">
+
+# scopyx - the web-egress plane
+
+**Your agents already reach the web. This is the part that decides whether they may.**
+
+[![CI](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml/badge.svg)](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml)
+![Go](https://img.shields.io/badge/go-1.26-00ADD8.svg)
+![tests](https://img.shields.io/badge/tests-142-brightgreen.svg)
+![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
+
+<img src="assets/diagram.svg" alt="One request through scopyx: it clears the scheme and the host gates and is refused at the address gate, while the policy gate and the robots.txt gate are never reached, because the address rules sit before the policy that would have allowed it" width="960">
+
+<sub>The same argument on <a href="https://it-rat.com/services/scopyx.html">it-rat.com</a>, where you can pick which request to send and watch where it stops.</sub>
+
+</div>
 
 **A policy enforcement point for agent web egress.** It is not a browser.
 
@@ -19,6 +35,30 @@ fetcher you already use, and adds the four things that were missing.
 
 If a change would make the fetch better rather than the fetch more *governed*,
 it belongs in a backend somebody else maintains.
+
+<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 142 on 2026-08-10 -->
+
+## Where this fits in the stack
+
+scopyx is the egress plane of the TAIPANBOX agent-governance stack. Every other
+plane governs what your agents do to your own services: what they spend, what
+they may call, who they are. This is the one that watches the direction that
+leads outside.
+
+```mermaid
+flowchart LR
+  Agent["AI agent (any framework)"] -->|"fetch_url over MCP"| SX["scopyx: the egress plane"]
+  SX -->|"POST /v1/decide (PEP)"| WX["Wardryx: policy PDP"]
+  WX -.->|"allow / deny"| SX
+  SX -->|"only what was decided"| WEB[("the open web")]
+  SX ==>|"web_fetch / web_blocked"| BUS{{"agent-event bus + Agent Passport"}}
+  TF["TokenFuse: the money plane"] ==> BUS
+  IDX["Idryx: identity"] ==> BUS
+  BUS ==> TX["Trailryx: the record"]
+  BUS ==> HX["heraldyx: reads the log, mails you"]
+  GX[["Genaryx: the console"]] -.->|"reads it"| BUS
+  MX["Mockryx: pre-prod drills"] -->|"the injected-page scenario"| SX
+```
 
 ## Run it
 
@@ -129,6 +169,11 @@ browser rather than at the first fetch with a message about the network.
 
 ### How the browser is boxed in
 
+<div align="center">
+<img src="assets/browser.svg" alt="The chromium backend: the browser has no route to the network except a proxy scopyx owns, which refuses any destination the plane did not decide; CDP request interception rides on top for the counts and the per-URL decisions, and is deliberately not the enforcement" width="960">
+</div>
+
+
 The browser is launched with `--proxy-server` pointing at a proxy this process
 owns, and `--proxy-bypass-list=<-loopback>`, which removes even Chrome's own
 bypass for localhost. That proxy refuses any destination the plane did not
@@ -190,6 +235,11 @@ report confidently on the half it got.
 
 ## A URL is personal data
 
+<div align="center">
+<img src="assets/url.svg" alt="A URL is personal data: the path and query string, which is where an identifier or a session token lives, are never assembled into the event at all; what is kept is the origin and a SHA-384" width="960">
+</div>
+
+
 `https://crm.example/customers/12345?email=jane@example.com` is an address and
 also a name, an identifier and a contact detail.
 
@@ -235,18 +285,17 @@ attacking a stranger. Separately, EU AI Act Article 5(1)(e) prohibits untargeted
 scraping of facial images to build recognition databases, and a bulk-crawl mode
 is the feature that turns a governance tool into that.
 
-## Where it sits
+## It runs standalone
 
-scopyx is one plane in the TAIPANBOX agent stack. It asks
-[wardryx](https://github.com/TAIPANBOX/wardryx) for decisions, writes events in
-the envelope [agent-passport](https://github.com/TAIPANBOX/agent-passport)
-defines, and is shaped after
-[heraldyx](https://github.com/TAIPANBOX/heraldyx): a small process that owns a
-single privilege and is separate *because* of it.
+It asks [wardryx](https://github.com/TAIPANBOX/wardryx) for decisions, writes
+events in the envelope
+[agent-passport](https://github.com/TAIPANBOX/agent-passport) defines, and is
+shaped after [heraldyx](https://github.com/TAIPANBOX/heraldyx): a small process
+that owns a single privilege and is separate *because* of it.
 
-It runs standalone. The TokenFuse MCP broker in front of it adds things when
-present and is not a precondition, and that standalone path is covered by tests
-rather than by this sentence.
+The TokenFuse MCP broker in front of it adds things when present and is not a
+precondition, and that standalone path is covered by tests rather than by this
+sentence.
 
 ## Regulatory position
 
