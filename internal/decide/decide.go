@@ -38,6 +38,14 @@ const (
 	DenyRedirectDepth
 	// DenyCap: a local rate cap refused it before anything left.
 	DenyCap
+	// DenyRobots: the site's own robots.txt disallows this path for this
+	// user-agent.
+	//
+	// Distinct from DenyPolicy on purpose, and the distinction is not
+	// cosmetic: one is the operator's rule and the other is somebody else's
+	// preference. An operator reading a trail needs to know which of the two
+	// stopped their agent, because only one of them is theirs to change.
+	DenyRobots
 )
 
 func (v Verdict) String() string {
@@ -58,6 +66,8 @@ func (v Verdict) String() string {
 		return "deny_redirect_depth"
 	case DenyCap:
 		return "deny_cap"
+	case DenyRobots:
+		return "deny_robots"
 	}
 	return "unknown"
 }
