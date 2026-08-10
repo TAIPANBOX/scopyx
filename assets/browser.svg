@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -18 996 366" width="996" height="366" role="img" aria-label="The chromium backend: the browser is launched with no route to the network except a proxy scopyx owns, which refuses any destination the plane did not decide; CDP request interception rides on top of it for the counts and the per-URL decisions, and is deliberately not the enforcement">
+  <title>The browser has one way out, and it is not the browser's word for it</title>
+  <rect x="-18" y="-18" width="996" height="366" rx="16" fill="#0A0E13"/>
+  <rect x="-17.5" y="-17.5" width="995" height="365" rx="15.5" fill="none" stroke="rgba(255,255,255,.09)"/>
+
+  <style>
+    /* Requests leaving the browser, and what happens to each.
+       CSS rather than SMIL: GitHub renders a README's SVG as an image, so
+       scripts are stripped and clicks never arrive, but a stylesheet inside
+       the document still runs. */
+    @keyframes brOK {
+      0%,6%    { transform: translate(232px,134px); opacity: 0; }
+      10%      { transform: translate(232px,134px); opacity: 1; }
+      26%      { transform: translate(325px,150px); }
+      44%      { transform: translate(560px,186px); }
+      62%,72%  { transform: translate(733px,186px); opacity: 1; }
+      80%,100% { transform: translate(733px,186px); opacity: 0; }
+    }
+    @keyframes brNO {
+      0%,30%   { transform: translate(232px,214px); opacity: 0; }
+      34%      { transform: translate(232px,214px); opacity: 1; }
+      50%,88%  { transform: translate(325px,206px); opacity: 1; }
+      96%,100% { transform: translate(325px,206px); opacity: 0; }
+    }
+    @keyframes brRed  { 0%,52% { opacity:0; } 58%,88% { opacity:1; } 100% { opacity:0; } }
+    @keyframes brGreen{ 0%,56% { opacity:.35; } 62%,78% { opacity:1; } 100% { opacity:.35; } }
+    @keyframes brPulse{ 0%,100% { opacity:.55; } 50% { opacity:1; } }
+
+    .ok    { animation: brOK 9s cubic-bezier(.4,.05,.3,1) infinite; }
+    .no    { animation: brNO 9s cubic-bezier(.4,.05,.3,1) infinite; }
+    .redbox{ animation: brRed 9s linear infinite; }
+    .okbox { animation: brGreen 9s linear infinite; }
+    .floor { animation: brPulse 3.2s ease-in-out infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ok    { animation: none; transform: translate(733px,186px); }
+      .no    { animation: none; transform: translate(325px,206px); }
+      .redbox{ animation: none; opacity: 1; }
+      .okbox { animation: none; opacity: 1; }
+      .floor { animation: none; opacity: 1; }
+    }
+  </style>
+
+  <defs>
+    <marker id="bra" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#5A6675"/>
+    </marker>
+    <marker id="brx" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#FF8A8A"/>
+    </marker>
+  </defs>
+
+  <g font-family="ui-monospace,Menlo,monospace" text-anchor="middle">
+
+    <!-- the box the browser is in -->
+    <rect x="14" y="60" width="404" height="250" rx="14" fill="#0C1118" stroke="rgba(255,255,255,.10)"/>
+    <circle cx="34" cy="79" r="3.5" fill="#F0ABFC"/>
+    <text x="46" y="83" fill="#5A6675" font-size="10" letter-spacing="1.4" text-anchor="start">A BROWSER YOU INSTALLED, WITH ONE WAY OUT</text>
+
+    <rect x="42" y="104" width="180" height="60" rx="12" fill="#141C27" stroke="#2a3547"/>
+    <text x="132" y="128" fill="#E9EFF6" font-size="11.5" font-weight="700">chromium</text>
+    <text x="132" y="145" fill="#5A6675" font-size="9.5">fresh profile, deleted after</text>
+
+    <rect x="42" y="184" width="180" height="60" rx="12" fill="#141C27" stroke="#2a3547"/>
+    <text x="132" y="205" fill="#E9EFF6" font-size="10.5" font-weight="700">the page's own requests</text>
+    <text x="132" y="221" fill="#5A6675" font-size="9.5">a document plus forty</text>
+    <text x="132" y="234" fill="#5A6675" font-size="9.5">others nobody named</text>
+    <line x1="132" y1="164" x2="132" y2="182" stroke="#2a3547" stroke-width="1.4" marker-end="url(#bra)"/>
+
+    <!-- the floor -->
+    <rect x="252" y="104" width="146" height="140" rx="12" fill="#1B1522" stroke="#F0ABFC"/>
+    <text x="325" y="130" fill="#F0ABFC" font-size="11.5" font-weight="700">the proxy</text>
+    <text x="325" y="147" fill="#E9EFF6" font-size="10" font-weight="700">scopyx owns it</text>
+    <text x="325" y="171" fill="#8A97A6" font-size="9.5">every connection is</text>
+    <text x="325" y="184" fill="#8A97A6" font-size="9.5">decided and pinned to</text>
+    <text x="325" y="197" fill="#8A97A6" font-size="9.5">a checked address</text>
+    <text class="floor" x="325" y="221" fill="#F0ABFC" font-size="9.5">THE FLOOR</text>
+    <text x="325" y="234" fill="#5A6675" font-size="8.5">a socket that is not opened</text>
+    <line x1="222" y1="134" x2="250" y2="134" stroke="#2a3547" stroke-width="1.4" marker-end="url(#bra)"/>
+    <line x1="222" y1="214" x2="250" y2="214" stroke="#2a3547" stroke-width="1.4" marker-end="url(#bra)"/>
+
+    <text x="216" y="284" fill="#5A6675" font-size="9.5">--proxy-server, and --proxy-bypass-list=&#60;-loopback&#62;,</text>
+    <text x="216" y="297" fill="#5A6675" font-size="9.5">which removes even Chrome's own bypass for localhost</text>
+
+    <!-- the accountant, deliberately beside rather than in the path -->
+    <rect x="470" y="40" width="230" height="96" rx="12" fill="#141C27" stroke="#2a3547" stroke-dasharray="5 4"/>
+    <text x="585" y="64" fill="#E9EFF6" font-size="11" font-weight="700">CDP interception</text>
+    <text x="585" y="81" fill="#8A97A6" font-size="9.5">sees the full URL of every</text>
+    <text x="585" y="94" fill="#8A97A6" font-size="9.5">request, including inside TLS</text>
+    <text x="585" y="115" fill="#F4B23E" font-size="9.5">THE ACCOUNTANT</text>
+    <text x="585" y="128" fill="#5A6675" font-size="9">the browser's cooperation, not a floor</text>
+    <path d="M247 104 C247 60 380 40 468 60" fill="none" stroke="#2a3547" stroke-width="1.4"
+          stroke-dasharray="4 5" marker-end="url(#bra)"/>
+
+    <!-- what leaves, and what does not -->
+    <rect class="okbox" x="470" y="160" width="230" height="52" rx="10" fill="#141C27" stroke="#7BE0A8"/>
+    <text x="585" y="181" fill="#7BE0A8" font-size="10.5" font-weight="700">allowed</text>
+    <text x="585" y="197" fill="#5A6675" font-size="9">dialled at the checked address</text>
+    <line x1="398" y1="174" x2="468" y2="180" stroke="#2a3547" stroke-width="1.4" marker-end="url(#bra)"/>
+
+    <rect class="redbox" x="470" y="228" width="230" height="52" rx="10" fill="#1F1418" stroke="#FF8A8A"/>
+    <text class="redbox" x="585" y="249" fill="#FF8A8A" font-size="10.5" font-weight="700">refused, and counted</text>
+    <text class="redbox" x="585" y="265" fill="#5A6675" font-size="9">403 to the browser, blocked in the record</text>
+    <line x1="398" y1="200" x2="468" y2="248" stroke="#FF8A8A" stroke-width="1.4" marker-end="url(#brx)"/>
+
+    <!-- the web -->
+    <rect x="752" y="160" width="194" height="52" rx="12" fill="#141C27" stroke="#2a3547"/>
+    <text x="849" y="181" fill="#E9EFF6" font-size="11.5" font-weight="700">the open web</text>
+    <text x="849" y="197" fill="#5A6675" font-size="9.5">reached only through the floor</text>
+    <line x1="700" y1="186" x2="750" y2="186" stroke="#2a3547" stroke-width="1.4" marker-end="url(#bra)"/>
+
+    <!-- what was measured, because the redundancy is the claim -->
+    <rect x="752" y="228" width="194" height="82" rx="10" fill="#0C1118" stroke="rgba(255,255,255,.10)"/>
+    <text x="849" y="248" fill="#E9EFF6" font-size="10" font-weight="700">measured, not asserted</text>
+    <text x="849" y="266" fill="#8A97A6" font-size="8.5">CDP blocking removed: still refused</text>
+    <text x="849" y="280" fill="#8A97A6" font-size="8.5">proxy decision removed: still refused</text>
+    <text x="849" y="294" fill="#FF8A8A" font-size="8.5">both removed: reached once, test red</text>
+
+    <g class="ok" transform="translate(733,186)">
+      <circle r="11" fill="#7BE0A8" opacity=".18"/>
+      <rect x="-7" y="-7" width="14" height="14" rx="4" fill="#7BE0A8"/>
+    </g>
+    <g class="no" transform="translate(325,206)">
+      <circle r="11" fill="#FF8A8A" opacity=".18"/>
+      <rect x="-7" y="-7" width="14" height="14" rx="4" fill="#FF8A8A"/>
+    </g>
+  </g>
+</svg>

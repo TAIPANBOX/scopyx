@@ -403,11 +403,19 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		// complete, which the truncation value below is for.
 	}
 
-	mu.Lock()
-	hop := navHop
-	mu.Unlock()
+	// Copied under the lock, and this is not defensive tidiness: the handler
+	// runs on the goroutine reading the browser's pipe, and events keep
+	// arriving while this one evaluates the document. Reading `seen` directly
+	// here is a data race, which `-race` found in CI and a laptop did not.
+	snapshot := func() (string, []Subresource) {
+		mu.Lock()
+		defer mu.Unlock()
+		return navHop, append([]Subresource(nil), seen...)
+	}
+
+	hop, counted := snapshot()
 	if hop != "" {
-		return Result{RedirectTo: hop, FinalURL: req.URL, Subresources: mergeCounts(seen, px)}, nil
+		return Result{RedirectTo: hop, FinalURL: req.URL, Subresources: mergeCounts(counted, px)}, nil
 	}
 
 	var eval struct {
@@ -443,11 +451,15 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		finalURL = req.URL
 	}
 
+	// Taken again rather than reused: the evaluate calls above are round trips
+	// to the browser, and a page's own scripts keep fetching during them.
+	_, counted = snapshot()
+
 	return Result{
 		FinalURL:     finalURL,
 		Body:         body,
 		HTTPStatus:   200,
-		Subresources: mergeCounts(seen, px),
+		Subresources: mergeCounts(counted, px),
 		TruncatedBy:  trunc,
 	}, nil
 }

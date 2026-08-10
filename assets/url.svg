@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 -18 996 322" width="996" height="322" role="img" aria-label="A URL is personal data: the path and query string, which is where an identifier or a session token lives, are never assembled into the event at all; what is kept is the origin and a SHA-384, so two records can be compared without either holding the address">
+  <title>A URL is personal data, and the record is built around that</title>
+  <rect x="-18" y="-18" width="996" height="322" rx="16" fill="#0A0E13"/>
+  <rect x="-17.5" y="-17.5" width="995" height="321" rx="15.5" fill="none" stroke="rgba(255,255,255,.09)"/>
+
+  <defs>
+    <marker id="ua" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#5A6675"/>
+    </marker>
+  </defs>
+
+  <g font-family="ui-monospace,Menlo,monospace">
+    <text x="14" y="26" fill="#5A6675" font-size="10" letter-spacing="1.4">ONE URL AN AGENT WAS ASKED TO FETCH</text>
+
+    <!-- the URL, split where the plane splits it -->
+    <rect x="14" y="40" width="270" height="42" rx="9" fill="#141C27" stroke="#7BE0A8"/>
+    <text x="149" y="66" fill="#7BE0A8" font-size="12" text-anchor="middle">https://crm.example</text>
+
+    <rect x="290" y="40" width="642" height="42" rx="9" fill="#1F1418" stroke="#FF8A8A"/>
+    <text x="611" y="66" fill="#FF8A8A" font-size="12" text-anchor="middle">/customers/12345?email=jane@example.com&amp;session=8f2c...</text>
+
+    <text x="149" y="100" fill="#8A97A6" font-size="9.5" text-anchor="middle">an address</text>
+    <text x="611" y="100" fill="#8A97A6" font-size="9.5" text-anchor="middle">a name, an identifier, a contact detail, and a credential</text>
+
+    <line x1="149" y1="112" x2="149" y2="146" stroke="#2a3547" stroke-width="1.4" marker-end="url(#ua)"/>
+    <line x1="611" y1="112" x2="611" y2="146" stroke="#FF8A8A" stroke-width="1.4" stroke-dasharray="4 5"/>
+    <text x="611" y="160" fill="#FF8A8A" font-size="10.5" text-anchor="middle" font-weight="700">never assembled into the event at all</text>
+    <text x="611" y="176" fill="#5A6675" font-size="9.5" text-anchor="middle">not dropped later, not redacted later: the field is never built</text>
+
+    <!-- what the journal holds -->
+    <rect x="14" y="152" width="420" height="132" rx="12" fill="#0C1118" stroke="rgba(255,255,255,.10)"/>
+    <circle cx="34" cy="171" r="3.5" fill="#F0ABFC"/>
+    <text x="46" y="175" fill="#5A6675" font-size="10" letter-spacing="1.4">WHAT THE RECORD KEEPS</text>
+    <text x="30" y="202" fill="#8A97A6" font-size="10.5">origin</text>
+    <text x="140" y="202" fill="#E9EFF6" font-size="10.5">https://crm.example</text>
+    <text x="30" y="224" fill="#8A97A6" font-size="10.5">url_sha384</text>
+    <text x="140" y="224" fill="#E9EFF6" font-size="10.5">sha384:0ae4006e9bd9fa46...</text>
+    <text x="30" y="246" fill="#8A97A6" font-size="10.5">verdict</text>
+    <text x="140" y="246" fill="#E9EFF6" font-size="10.5">allow</text>
+    <text x="30" y="270" fill="#5A6675" font-size="9.5">two records compare without either holding the address</text>
+
+    <!-- the opt-in, named honestly -->
+    <rect x="452" y="152" width="480" height="132" rx="12" fill="#0C1118" stroke="rgba(255,255,255,.10)"/>
+    <circle cx="472" cy="171" r="3.5" fill="#F4B23E"/>
+    <text x="484" y="175" fill="#5A6675" font-size="10" letter-spacing="1.4">AND IF YOU DELIBERATELY WANT THE URL</text>
+    <text x="470" y="202" fill="#F4B23E" font-size="10.5">SCOPYX_RETAIN=payload</text>
+    <text x="470" y="224" fill="#8A97A6" font-size="10">writes it into a field called</text>
+    <text x="470" y="246" fill="#E9EFF6" font-size="11" font-weight="700">url_unprotected</text>
+    <text x="470" y="270" fill="#5A6675" font-size="9.5">named that because there is no subject-keyed payload plane here,</text>
+    <text x="470" y="282" fill="#5A6675" font-size="9.5">and a field called `url` would imply one</text>
+  </g>
+</svg>
