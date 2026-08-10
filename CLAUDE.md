@@ -307,10 +307,20 @@ an absent invariant.
     unauthenticated remote-control channel for the browser this plane fetches
     with, on the operator's own box.
 
-    **Nothing is bundled into the default image.** It stays distroless and
-    15.4 MB; the browser variant is 1.03 GB, published under its own
-    `-chromium` tag, and the sixty-seven-times ratio is the whole argument for
-    keeping them apart. A missing browser is refused at startup with a message
+    **HOME must name a directory that exists and is writable**, and the image
+    sets it to `/tmp`. `useradd -M` creates no home directory, and on a k3s pod
+    on EC2 that killed the browser before it opened anything, with an error
+    about a crash-handler database that named nothing about a home directory.
+    v0.1.1 shipped that way and could not render on a real node. Measured
+    2026-08-10 on the node; NOT reproduced under `docker run` locally in any
+    shape tried, so the trigger is not isolated and the fix stands on its own.
+
+    **Nothing is bundled into the default image.** The default is 3.5 MB to
+    pull and 15.4 MB on disk; the browser variant is 267 MB to pull and 1.03 GB
+    on disk, under its own `-chromium` tag. TWO numbers, always, because they
+    answer different questions and this file said only the disk one for a day,
+    beside a sentence about pulling. Seventy-six times the transfer is the
+    argument for keeping them apart. A missing browser is refused at startup with a message
     about the browser rather than at the first fetch with a message about the
     network.
 
@@ -327,8 +337,12 @@ an absent invariant.
     `SCOPYX_CHROMIUM_NO_SANDBOX=1` keeps the container's filter. Both were
     measured rendering on 2026-08-10.
 
-    For THIS component the first is the better trade, and the reason is the
-    product's own subject: with Chrome's sandbox off, a renderer exploit runs
+    On Kubernetes that choice may already be made for the operator: a namespace
+    at PodSecurity `restricted` forbids `Unconfined` outright, and the pod is
+    refused rather than warned. See stack-k8s GOTCHAS 84.
+
+    For THIS component the first is the better trade where it is available, and
+    the reason is the product's own subject: with Chrome's sandbox off, a renderer exploit runs
     as the container's user and can open sockets directly, which is egress that
     never passes the proxy and never appears in the record. The container's
     seccomp filter protects the host from the container; it does not protect
