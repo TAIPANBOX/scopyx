@@ -57,27 +57,30 @@ staticcheck ./...
 go test -race ./...
 go build ./...
 ./scripts/no-caller-headers.sh
+./scripts/one-way-out.sh
+./scripts/readme-numbers.sh
+./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
 
-**This list was wrong from the day it was written, and the correction is worth
-more than the list.** It also named `one-way-out.sh`, `readme-numbers.sh` and
-`gates-have-teeth.sh`. `scripts/` has contained exactly one file since the
-first commit; those three were copied from the sibling repositories that have
-them, and nothing here has ever been able to run them. A model following this
-file would have got "no such file or directory" three times and, on a bad day,
-carried on.
+**This list was wrong from the day it was written until 2026-08-10, and the
+correction is worth more than the list.** It named these four from the first
+commit and `scripts/` held one file: the other three were copied from the
+sibling repositories that have them, and nothing here could run them. A model
+following this file got "no such file or directory" three times.
 
-The same shape as invariant 9's `robots.txt` claim, one level up: **prose
-describing a check reads exactly like a check.** Missing, and named here so the
-absence is visible rather than implied:
+They exist now, and each one caught something while being written, which is
+the argument for writing them rather than describing them:
 
-- `one-way-out.sh`, which heraldyx has: refuse any egress path other than the
-  one this component is allowed. Here that is http and https, and nothing else.
-- `readme-numbers.sh`, which genaryx, mockryx and trailryx have: refuse a
-  figure in the README that the suite does not produce.
-- `gates-have-teeth.sh`, which ten repositories in this estate have and this
-  one does not: run each gate against a planted fault and refuse to report a
-  pass it did not measure. scopyx is the only repository without it.
+- `one-way-out.sh` flagged a COMMENT that named `http.Transport{` while
+  explaining why only `internal/pin` may build one. A gate that fails on its
+  own documentation is switched off inside a week. It strips comments now.
+- `one-way-out.sh` also reported a build problem when its whole subject was
+  gone, because the pure-layer check ran before the check that any Go files
+  exist. The subject is established first now.
+- `readme-numbers.sh` read `%20` out of the badge URL and reported twenty
+  direct dependencies. Found on its first run, against itself.
+
+All three were found by `gates-have-teeth.sh`, which is what it is for.
 
 ## Hard invariants
 
@@ -248,11 +251,14 @@ an absent invariant.
     process, which is why it reports `navigation_only`. The policy client is
     not pinned either, because wardryx is an internal service and a pinned
     dialer would make this plane fail closed against its own control plane.
-    *(test: `internal/pin`, ten cases, verified by replacing the dialer with
-    one that resolves the name itself, which reddens the two that matter; plus
-    the end-to-end harness now runs on the real pinned client, verified by
-    giving robots its own unpinned one and watching
-    `TestADisallowedPathIsRefusedAndTheTargetNeverSeesIt` fail)*
+    *(gate: `scripts/one-way-out.sh`, which refuses any `http.Transport` outside
+    `internal/pin` and any `net.Dialer` outside it and `internal/browserproxy`.
+    That is the structural half: a second transport is a second dialer, and a
+    dialer that resolves the name itself is this hole reopened. Plus `internal/pin`,
+    ten cases, verified by replacing the dialer with one that resolves the name
+    itself, which reddens the two that matter; and the end-to-end harness runs on
+    the real pinned client, verified by giving robots its own unpinned one and
+    watching `TestADisallowedPathIsRefusedAndTheTargetNeverSeesIt` fail)*
 
 12. **A browser this plane drives has exactly one way out, and it is not the
     browser's word for it.** The `chromium` backend launches with
@@ -306,7 +312,7 @@ an absent invariant.
 
 This list is debt, and it is here to stay visible rather than to be tidy.
 
-Invariants 1, 4 and 12 are mechanically checkable and each is named above with
+Invariants 1, 4 and 13 are mechanically checkable and each is named above with
 the shape of the check it needs. Invariants 2 and 9 are judgement and probably
 stay judgement.
 

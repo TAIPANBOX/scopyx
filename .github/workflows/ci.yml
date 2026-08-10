@@ -78,6 +78,18 @@ jobs:
       - name: the tool accepts no caller headers
         run: ./scripts/no-caller-headers.sh
 
+      - name: one way out
+        run: ./scripts/one-way-out.sh
+
+      - name: every number the README states
+        run: ./scripts/readme-numbers.sh
+
+      # Last, because it mutates tracked files and restores them. It needs a
+      # clean tree and says so plainly, so it also reports any earlier step
+      # that started writing into the checkout.
+      - name: the gates above can still fail
+        run: ./scripts/gates-have-teeth.sh
+
   # The image is built on every PR and pushed nowhere.
   #
   # A Dockerfile that only ever runs on a release tag is a Dockerfile that
