@@ -136,6 +136,13 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 		// decision that said no.
 		ctx = pin.With(ctx, u.Hostname(), addrs)
 
+		// And the navigation's allow-set travels with it, for a backend that
+		// fetches subresources this loop never sees. It decides them with the
+		// same pure function and the same policy answer; without this it would
+		// have to hold its own idea of what is allowed, which is invariant 1
+		// broken from the inside.
+		ctx = decide.WithAllowDomains(ctx, answer.PolicyAnswer.AllowDomains)
+
 		// The site's own preference, asked AFTER the operator's policy and
 		// before the fetch. The order is deliberate: a destination the
 		// operator forbids is refused without this plane fetching anything

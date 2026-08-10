@@ -1,6 +1,7 @@
 package decide
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -235,4 +236,35 @@ func domainAllowed(host string, allow []string) bool {
 		}
 	}
 	return false
+}
+
+// --- the allow-set, carried to a backend that fetches subresources ---
+//
+// A rendering backend decides forty requests the caller never named, and it
+// must decide them against the SAME allow-set the navigation was granted. It
+// cannot be a field on the backend: one backend serves concurrent fetches, and
+// a field would be one fetch's policy applied to another's page.
+//
+// So it travels with the fetch, in its context. This lives here, beside
+// `Subresource`, because the allow-set is that function's parameter and a
+// helper in the backend package would be a second place that knows what a
+// policy answer contains.
+
+type allowKey struct{}
+
+// WithAllowDomains carries the navigation's allow-set.
+func WithAllowDomains(ctx context.Context, domains []string) context.Context {
+	return context.WithValue(ctx, allowKey{}, domains)
+}
+
+// AllowDomainsFrom reports the allow-set, or nil.
+//
+// Nil means the policy declared no domain restriction, which `Subresource`
+// already reads as "bounded by the address rules and nothing else". It does
+// NOT mean "allow nothing": a request with no allow-set still passes through
+// scheme, host and address, and a backend that read nil as a refusal would
+// break every page an unrestricted policy permits.
+func AllowDomainsFrom(ctx context.Context) []string {
+	d, _ := ctx.Value(allowKey{}).([]string)
+	return d
 }

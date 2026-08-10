@@ -47,6 +47,10 @@ var version = "dev"
 // deciding to. There is no unlimited mode without SCOPYX_MAX_FETCHES_PER_HOUR
 // being set deliberately, and setting it to 0 says so in the log at startup.
 const (
+	// A rendering fetch is slower than a plain one by a browser launch, and a
+	// bound that fits the plain case would time out every real page.
+	defaultBrowserTimeout = 45 * time.Second
+
 	defaultAddr            = "127.0.0.1:4300"
 	defaultMaxBodyBytes    = 32 << 20
 	defaultMaxRedirects    = 10
@@ -106,6 +110,17 @@ func run(log *slog.Logger) error {
 	back, err := chooseBackend(pinned)
 	if err != nil {
 		return err
+	}
+	// The rendering backend decides subresources this process never named, and
+	// it is given the SAME resolver and the SAME pure decision function the
+	// navigation used. Handed in rather than reached for: a backend that could
+	// find its own resolver could find a different one, which is invariant 1
+	// broken quietly.
+	if ch, ok := back.(*backend.Chromium); ok {
+		ch.Resolve = systemResolver{}.Resolve
+		ch.Allow = func(ctx context.Context, rawURL string, addrs []netip.Addr) decide.Decision {
+			return decide.Subresource(rawURL, addrs, decide.AllowDomainsFrom(ctx))
+		}
 	}
 
 	journal, err := record.Open(os.Getenv("SCOPYX_EVENTS"), os.Getenv("SCOPYX_RETAIN") == "payload")
@@ -244,9 +259,21 @@ func chooseBackend(hc *http.Client) (backend.Backend, error) {
 			endpoint,
 			os.Getenv("SCOPYX_EXTERNAL_KEY"),
 			defaultBackendTimeout), nil
+	case "chromium":
+		// A browser the OPERATOR installed. Nothing is bundled and nothing is
+		// downloaded: the image stays distroless and small, and a governance
+		// component does not put 300 MB of somebody else's browser on a box
+		// without being asked. Refused at startup when there is none, rather
+		// than at the first fetch, so the error names the missing browser
+		// instead of describing a network problem.
+		return backend.NewChromium(
+			os.Getenv("SCOPYX_CHROMIUM"),
+			envInt("SCOPYX_MAX_BYTES", defaultMaxBodyBytes),
+			defaultBrowserTimeout)
 	default:
 		return nil, fmt.Errorf("SCOPYX_BACKEND=%q is not a backend this build has. "+
-			"Known: passthrough (the default, no vendor), external (your own fetching service)", name)
+			"Known: passthrough (the default, no vendor), external (your own fetching "+
+			"service), chromium (a browser you installed)", name)
 	}
 }
 

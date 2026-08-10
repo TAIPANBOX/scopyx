@@ -254,7 +254,48 @@ an absent invariant.
     giving robots its own unpinned one and watching
     `TestADisallowedPathIsRefusedAndTheTargetNeverSeesIt` fail)*
 
-12. **Never claim compliance.** The wording is "covers the requirements of
+12. **A browser this plane drives has exactly one way out, and it is not the
+    browser's word for it.** The `chromium` backend launches with
+    `--proxy-server` pointing at a proxy this process owns and
+    `--proxy-bypass-list=<-loopback>`, which removes even Chrome's own bypass
+    for localhost. That proxy refuses any destination the plane did not decide.
+
+    CDP `Fetch` interception runs on top of it and is NOT the enforcement. It
+    sees the full URL of every request including inside TLS, which the proxy
+    cannot, so it produces the counts and the per-URL decisions. But it is
+    Chrome's cooperation, and cooperation is a thing a bug, a flag or a version
+    can withdraw. The connection is the floor because it is what carries bytes.
+
+    **The two were measured separately.** With CDP blocking removed the refused
+    subresource's server is still never reached; with the proxy decision
+    removed it is still never reached; with both removed it is reached once and
+    the case goes red. That is what makes the redundancy a fact rather than a
+    claim.
+
+    No TLS interception, ever. Minting certificates for other people's sites
+    would put a private CA on the operator's box and build the capability this
+    plane exists to bound.
+
+    A fresh `--user-data-dir` per fetch, removed after: invariant 4, where it is
+    least theoretical. A warm browser is the obvious optimisation, it would pass
+    every other test, and it would join two tenants' pages in one storage
+    partition.
+
+    **No debugging PORT.** `internal/cdp` speaks over `--remote-debugging-pipe`
+    and refuses to launch with a port, because a debugging port is an
+    unauthenticated remote-control channel for the browser this plane fetches
+    with, on the operator's own box.
+
+    **Nothing is bundled and nothing is downloaded.** The browser is one the
+    operator installed. The image stays distroless and small, and a missing
+    browser is refused at startup with a message about the browser rather than
+    at the first fetch with a message about the network.
+    *(test: `internal/backend/chromium_test.go` against a real browser, and
+    `internal/browserproxy` and `internal/cdp` without one. The browser cases
+    SKIP where there is none, loudly, and `SCOPYX_REQUIRE_CHROMIUM` turns the
+    skip into a failure so CI cannot quietly stop exercising them.)*
+
+13. **Never claim compliance.** The wording is "covers the requirements of
     Article 12", never "GDPR compliant" or "AI Act compliant". This binds the
     README, the site, PR bodies and release notes equally. A claim nobody can
     hold is worse than no claim, because a reader trusts the whole document on
