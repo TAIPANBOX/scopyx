@@ -56,11 +56,28 @@ go vet ./...
 staticcheck ./...
 go test -race ./...
 go build ./...
-./scripts/one-way-out.sh
 ./scripts/no-caller-headers.sh
-./scripts/readme-numbers.sh
-./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
+
+**This list was wrong from the day it was written, and the correction is worth
+more than the list.** It also named `one-way-out.sh`, `readme-numbers.sh` and
+`gates-have-teeth.sh`. `scripts/` has contained exactly one file since the
+first commit; those three were copied from the sibling repositories that have
+them, and nothing here has ever been able to run them. A model following this
+file would have got "no such file or directory" three times and, on a bad day,
+carried on.
+
+The same shape as invariant 9's `robots.txt` claim, one level up: **prose
+describing a check reads exactly like a check.** Missing, and named here so the
+absence is visible rather than implied:
+
+- `one-way-out.sh`, which heraldyx has: refuse any egress path other than the
+  one this component is allowed. Here that is http and https, and nothing else.
+- `readme-numbers.sh`, which genaryx, mockryx and trailryx have: refuse a
+  figure in the README that the suite does not produce.
+- `gates-have-teeth.sh`, which ten repositories in this estate have and this
+  one does not: run each gate against a planted fault and refuse to report a
+  pass it did not measure. scopyx is the only repository without it.
 
 ## Hard invariants
 
@@ -186,13 +203,6 @@ an absent invariant.
    Disallow read as a match on everything, `$` not anchoring, a 5xx read as a
    reading, and the cache never expiring)*
 
-   **What it does not close.** The robots.txt request resolves the host again,
-   independently of the lookup the decision was made on, so a name that
-   answered differently between the two would be fetched without the address
-   checks seeing it. Closing it means pinning the dialer to the already
-   resolved address, which is a change to how every backend is constructed.
-   Debt, not a line.
-
    Two of those are positioning and two are law-shaped. The estate is defensive
    tooling for an operator governing their own agents, and a component that
    defeated third-party controls would be the first one here useful to somebody
@@ -208,7 +218,43 @@ an absent invariant.
    to the payload plane behind the subject key, or nowhere. Nothing above debug
    ever logs a full URL. *(test)*
 
-11. **Never claim compliance.** The wording is "covers the requirements of
+11. **Nothing opens a socket to an address this plane did not check.**
+    `internal/fetch` resolves a name and `decide` refuses on every address it
+    answered with. Then the fetch used to resolve the name AGAIN, inside a
+    dialer, with no memory of what was checked, and a hostile zone is free to
+    answer differently in between. That is DNS rebinding, and the payoff is
+    the whole plane: a name that passes as a public address and rebinds to
+    169.254.169.254 reads the credentials of whatever this runs on.
+
+    `internal/pin` puts the checked addresses in the context and gives the
+    transport a dialer that uses them. It applies to the backend and to the
+    robots.txt fetch, which is the same client, so the site's own preference is
+    read over the route the decision was made on.
+
+    **It fails closed, and that is the part worth keeping.** A dial to a host
+    the context does not carry is REFUSED, with a typed error. The transport is
+    therefore an enforcement floor under invariant 1 rather than a second copy
+    of it: a code path that reached out without going through `internal/fetch`
+    cannot open a socket, whatever it thinks it is doing.
+
+    Keep-alives are off for the same reason and it looks like a performance
+    setting. A pooled connection is keyed on scheme, host and port, exactly
+    what a rebinding attack holds constant, so a reused socket would consult
+    the pin once and bypass it forever after.
+
+    Two things it does NOT cover, said plainly. The `external` backend calls a
+    service at an address the operator chose and no fetch decision covers that
+    host, so it is not pinned; what the vendor then reaches is outside this
+    process, which is why it reports `navigation_only`. The policy client is
+    not pinned either, because wardryx is an internal service and a pinned
+    dialer would make this plane fail closed against its own control plane.
+    *(test: `internal/pin`, ten cases, verified by replacing the dialer with
+    one that resolves the name itself, which reddens the two that matter; plus
+    the end-to-end harness now runs on the real pinned client, verified by
+    giving robots its own unpinned one and watching
+    `TestADisallowedPathIsRefusedAndTheTargetNeverSeesIt` fail)*
+
+12. **Never claim compliance.** The wording is "covers the requirements of
     Article 12", never "GDPR compliant" or "AI Act compliant". This binds the
     README, the site, PR bodies and release notes equally. A claim nobody can
     hold is worse than no claim, because a reader trusts the whole document on
@@ -219,10 +265,15 @@ an absent invariant.
 
 This list is debt, and it is here to stay visible rather than to be tidy.
 
-**Every invariant above is prose today**, because this repository is new. That
-is the honest state and it is also the first work: invariants 1, 4 and 11 are
-mechanically checkable and each is named above with the shape of the check it
-needs. Invariants 2 and 9 are judgement and probably stay judgement.
+Invariants 1, 4 and 12 are mechanically checkable and each is named above with
+the shape of the check it needs. Invariants 2 and 9 are judgement and probably
+stay judgement.
+
+Invariant 11 arrived with tests rather than prose, and it took invariant 9's
+one piece of recorded debt with it. Worth noting how that debt behaved: it sat
+for a day described exactly, in the file, with the reason it was not closed,
+and closing it took an afternoon. A debt that names its own shape is cheap; the
+expensive ones are the sentences that sound finished.
 
 The rule this estate uses: an approved decision is not finished until it is a
 numbered invariant here AND a gate in `scripts/` if it can be checked

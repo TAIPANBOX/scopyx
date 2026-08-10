@@ -19,6 +19,7 @@ import (
 
 	"github.com/TAIPANBOX/scopyx/internal/backend"
 	"github.com/TAIPANBOX/scopyx/internal/decide"
+	"github.com/TAIPANBOX/scopyx/internal/pin"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
 	"github.com/TAIPANBOX/scopyx/internal/robots"
 )
@@ -75,9 +76,11 @@ type Result struct {
 //     reached rather than about a string;
 //  2. ask the policy plane;
 //  3. decide, which is pure and refuses on scheme, host, address or policy;
-//  4. only now, call the backend.
+//  4. pin the dialer to the addresses that were just checked, so nothing below
+//     resolves the name a second time;
+//  5. only now, call the backend.
 //
-// Step 4 is unreachable for a refused destination, and that is the difference
+// Step 5 is unreachable for a refused destination, and that is the difference
 // between a governance layer and a fetcher that logs. A refused fetch never
 // reaches the operator's own service, so it never appears in their bill for it
 // either.
@@ -120,6 +123,18 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 		if !dec.Verdict.Allowed() {
 			return Result{}, &Refusal{Decision: dec}
 		}
+
+		// Pinned only now, and this line is the point of `internal/pin`.
+		//
+		// Everything above decided about ADDRESSES. Everything below would
+		// otherwise resolve the NAME again, inside a dialer, with no memory of
+		// what was checked, and a hostile zone is free to answer differently
+		// in between. From here the socket goes where the decision looked.
+		//
+		// After the verdict rather than before it, so a refused destination is
+		// never pinned and a later code path cannot inherit permission from a
+		// decision that said no.
+		ctx = pin.With(ctx, u.Hostname(), addrs)
 
 		// The site's own preference, asked AFTER the operator's policy and
 		// before the fetch. The order is deliberate: a destination the

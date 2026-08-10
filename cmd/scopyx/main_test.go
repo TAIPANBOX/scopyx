@@ -20,6 +20,7 @@ import (
 	"github.com/TAIPANBOX/scopyx/internal/backend"
 	"github.com/TAIPANBOX/scopyx/internal/decide"
 	"github.com/TAIPANBOX/scopyx/internal/mcp"
+	"github.com/TAIPANBOX/scopyx/internal/pin"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
 	"github.com/TAIPANBOX/scopyx/internal/record"
 	"github.com/TAIPANBOX/scopyx/internal/robots"
@@ -118,14 +119,22 @@ func newHarness(t *testing.T, decision string, res interface {
 	t.Cleanup(pdp.Close)
 
 	pass := backend.NewPassthrough(1<<20, 3*time.Second)
-	// The decision above ran on the resolver's answer; this only moves the
-	// socket, so the fixture can see what actually left.
+
+	// The REAL pinned client, with only the last step redirected at the
+	// fixture. `pin` refuses any host the decision did not cover and picks
+	// which checked address to use; the injected dial receives an address that
+	// has already been through all of that, and sends the socket to the
+	// fixture so the test can count what actually left.
+	//
+	// Wired this way rather than by replacing the transport, because replacing
+	// it is what the previous version did and it meant these tests exercised
+	// an arrangement main.go does not have: every case would have stayed green
+	// if the pin were removed from the server tomorrow.
 	targetAddr := strings.TrimPrefix(h.target.URL, "http://")
-	pass.HTTP.Transport = &http.Transport{
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, targetAddr)
-		},
-	}
+	pinned := pin.ClientWith(3*time.Second, func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, targetAddr)
+	})
+	pass.HTTP = pinned
 
 	h.journal = filepath.Join(t.TempDir(), "events.ndjson")
 	j, err := record.Open(h.journal, false)
@@ -134,12 +143,12 @@ func newHarness(t *testing.T, decision string, res interface {
 	}
 	t.Cleanup(func() { _ = j.Close() })
 
-	// The robots client shares the backend's transport, which is the same
-	// arrangement main.go makes: robots.txt is fetched from the origin that
-	// was just decided, over the same route the fetch itself will take.
+	// The robots client is the SAME pinned client, which is the arrangement
+	// main.go makes: robots.txt is fetched over the route the decision was
+	// made on, and cannot reach a host no decision covered.
 	g := &governed{
 		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		robots:   robots.New(robots.ModeReport, 0, &http.Client{Timeout: 3 * time.Second, Transport: pass.HTTP.Transport}),
+		robots:   robots.New(robots.ModeReport, 0, pinned),
 		backend:  pass,
 		pdp:      policy.New(pdp.URL, "k", time.Second),
 		journal:  j,
