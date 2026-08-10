@@ -292,10 +292,33 @@ an absent invariant.
     unauthenticated remote-control channel for the browser this plane fetches
     with, on the operator's own box.
 
-    **Nothing is bundled and nothing is downloaded.** The browser is one the
-    operator installed. The image stays distroless and small, and a missing
-    browser is refused at startup with a message about the browser rather than
-    at the first fetch with a message about the network.
+    **Nothing is bundled into the default image.** It stays distroless and
+    15.4 MB; the browser variant is 1.03 GB, published under its own
+    `-chromium` tag, and the sixty-seven-times ratio is the whole argument for
+    keeping them apart. A missing browser is refused at startup with a message
+    about the browser rather than at the first fetch with a message about the
+    network.
+
+    **The Dockerfile's stage ORDER is load-bearing.** `docker build .` with no
+    `--target` builds the last stage, so the distroless one sits at the bottom
+    and the browser variant above it. Appended at the end, the variant quietly
+    became what an unqualified build produced, which `docker image ls`
+    reporting the same size for both is what gave away. CI builds both, so a
+    reorder is noticed.
+
+    **In a container the sandbox question is which one to keep, not whether.**
+    Chromium will not start without the user namespaces its renderer sandbox
+    needs. Relaxing the container's seccomp keeps Chrome's sandbox; setting
+    `SCOPYX_CHROMIUM_NO_SANDBOX=1` keeps the container's filter. Both were
+    measured rendering on 2026-08-10.
+
+    For THIS component the first is the better trade, and the reason is the
+    product's own subject: with Chrome's sandbox off, a renderer exploit runs
+    as the container's user and can open sockets directly, which is egress that
+    never passes the proxy and never appears in the record. The container's
+    seccomp filter protects the host from the container; it does not protect
+    the record from a compromised renderer. The image does not choose: it ships
+    with the sandbox on.
     *(test: `internal/backend/chromium_test.go` against a real browser, and
     `internal/browserproxy` and `internal/cdp` without one. The browser cases
     SKIP where there is none, loudly, and `SCOPYX_REQUIRE_CHROMIUM` turns the

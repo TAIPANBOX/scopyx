@@ -163,9 +163,46 @@ backend for which `per_request` is a measurement rather than a definition:
 `passthrough` is per-request because it makes exactly one request, and a page
 is a document plus forty others.
 
-Nothing is bundled and nothing is downloaded. The image stays distroless and
-small, and a missing browser is refused at startup with a message about the
-browser rather than at the first fetch with a message about the network.
+Nothing is bundled into the default image, and nothing is downloaded at run
+time. A missing browser is refused at startup with a message about the browser
+rather than at the first fetch with a message about the network.
+
+### Two images, and the ratio is why
+
+| tag | what is in it | size |
+|---|---|---|
+| `ghcr.io/taipanbox/scopyx:v0.1.0` | the service, distroless, non-root | **15.4 MB** |
+| `ghcr.io/taipanbox/scopyx:v0.1.0-chromium` | the same service plus Chromium | **1.03 GB** |
+
+Measured 2026-08-10 with `docker image ls`. Sixty-seven times the size is the
+reason the browser is a separate tag rather than the default: a governance
+component that put a browser on every box whether or not the operator wanted
+rendering would be answering a question nobody asked.
+
+### The sandbox in a container: you are choosing which one to keep
+
+Chromium refuses to start in a container that cannot give it the user
+namespaces its renderer sandbox needs, and the error says so. Both ways out
+were measured on 2026-08-10, and both render:
+
+```bash
+# keep Chrome's sandbox, relax the container's syscall filter
+docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v0.1.0-chromium
+
+# keep the container's syscall filter, turn Chrome's sandbox off
+docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v0.1.0-chromium
+```
+
+**For this component the first is the better trade, and the reason is the
+product's own subject.** Chrome's sandbox is what stands between a hostile page
+and code execution inside the container. With it off, a renderer exploit runs
+as the container's user and can open sockets directly, which is egress that
+never passes the proxy and never appears in the record. The container's seccomp
+filter protects the host from the container; it does not protect the record
+from a compromised renderer.
+
+The image does not choose for you. It ships with the sandbox on, and turning it
+off is one environment variable that says what it does.
 
 ### How the browser is boxed in
 

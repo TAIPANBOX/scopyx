@@ -31,6 +31,77 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/scopyx ./cmd/scopyx
+# ORDER MATTERS HERE, and it bit once already.
+#
+# The distroless stage is LAST on purpose: `docker build .` with no `--target`
+# builds the final stage, so whichever stage sits at the bottom is what an
+# unqualified build produces. With the browser stage appended at the end,
+# `docker build .` quietly started producing the 1 GB browser image under the
+# default tag, and `docker image ls` reporting the same size for both is what
+# gave it away. The variant is opt-in, so it goes above.
+
+# --------------------------------------------------------------------------
+# The browser variant, and it is a SEPARATE image on purpose.
+# --------------------------------------------------------------------------
+#
+# `SCOPYX_BACKEND=chromium` drives a browser the operator installed. The image
+# above has none, deliberately: it is distroless and about 12 MB, and a
+# governance component that put 500 MB of somebody else's browser on every box
+# whether or not they wanted rendering would be answering a question nobody
+# asked.
+#
+# So the browser lives here, under its own tag, and the default stays what it
+# was. An operator who wants rendering opts in by pulling a different image,
+# which is a decision with a size attached rather than a surprise.
+#
+# WHY DEBIAN AND NOT ALPINE
+#
+# Chromium on musl exists and is a different browser in the ways that matter
+# here: different sandbox behaviour, different crash modes, and a much smaller
+# set of people who have run it in anger. This plane's job is to be predictable
+# about what a browser does, so it runs the build most of the world runs.
+#
+# THE SANDBOX IS NOT DISABLED HERE
+#
+# No `SCOPYX_CHROMIUM_NO_SANDBOX` in this image. On a host whose kernel gives
+# Chrome the user namespaces its renderer sandbox needs, it works, and an image
+# that turned it off would take that away from everybody to make one platform
+# easier. Where it cannot initialise, the DEPLOYMENT decides, visibly, and the
+# error names both ways out.
+FROM debian:bookworm-slim AS browser
+LABEL org.opencontainers.image.title="scopyx (with a browser)"
+LABEL org.opencontainers.image.description="scopyx plus Chromium, for SCOPYX_BACKEND=chromium. The default image ships no browser on purpose."
+LABEL org.opencontainers.image.source="https://github.com/TAIPANBOX/scopyx"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# `--no-install-recommends` is load-bearing rather than tidy: the recommends of
+# chromium pull a desktop's worth of packages, and every one of them is more
+# code on the box that reaches the open web.
+# The trims below are measured rather than folklore. Before them this layer was
+# 714 MB and the image 1.13 GB; each line names what it removes and why that is
+# safe for a headless renderer that never draws a window.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -f /usr/lib/chromium/libVkLayer_khronos_validation.so \
+ && rm -rf /usr/share/icons /usr/share/doc /usr/share/man /usr/share/locale \
+ && rm -rf /usr/share/X11 /usr/share/mime \
+ && groupadd -g 65532 nonroot \
+ && useradd -u 65532 -g 65532 -M -s /usr/sbin/nologin nonroot \
+ && mkdir -p /var/lib/scopyx \
+ && chown 65532:65532 /var/lib/scopyx
+
+VOLUME ["/var/lib/scopyx"]
+COPY --from=build /out/scopyx /usr/local/bin/service
+
+# Named rather than searched. `cdp.Find` would look on PATH and find the same
+# binary, and saying it here means a base image that renames or moves chromium
+# fails at startup with a message about the browser instead of at the first
+# fetch with a message about the network.
+ENV SCOPYX_CHROMIUM=/usr/bin/chromium
+
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/service"]
 
 FROM gcr.io/distroless/static-debian12:nonroot
 LABEL org.opencontainers.image.title="scopyx"
