@@ -116,6 +116,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The browser variant too, and for its own reason rather than symmetry:
+      # the browser stage sits ABOVE the distroless one in the Dockerfile, so
+      # `docker build .` with no target builds the small image. That ordering is
+      # load-bearing and invisible, and it was wrong once: appended at the end,
+      # the variant quietly became what an unqualified build produced. Building
+      # both here means the day somebody reorders them, CI notices.
+      - name: the browser variant builds
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: browser
+          push: false
+          build-args: |
+            VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   security:
     runs-on: ubuntu-latest
     steps:

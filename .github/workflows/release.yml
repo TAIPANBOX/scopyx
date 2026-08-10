@@ -67,9 +67,41 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The browser variant, under its own tag and never under the plain one.
+      #
+      # It is 1.03 GB against 15.4 MB, both measured on 2026-08-10, and that
+      # ratio is the reason it is a separate tag rather than the default: a
+      # governance component that put a browser on every box whether or not the
+      # operator wanted rendering would be answering a question nobody asked.
+      - name: Image metadata, browser variant
+        id: meta_browser
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/scopyx
+          flavor: latest=false
+          tags: |
+            type=ref,event=tag,suffix=-chromium
+            type=sha,format=short,suffix=-chromium
+
+      - name: Build and push the browser variant
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: browser
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          push: true
+          tags: ${{ steps.meta_browser.outputs.tags }}
+          labels: ${{ steps.meta_browser.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Say what was published
         run: |
           echo "published:"
           echo "${{ steps.meta.outputs.tags }}" | sed 's/^/  /'
+          echo "${{ steps.meta_browser.outputs.tags }}" | sed 's/^/  /'
           echo
           echo "platforms: linux/amd64, linux/arm64"
