@@ -68,17 +68,18 @@ type Chromium struct {
 	// Timeout bounds one whole fetch, browser launch included.
 	Timeout time.Duration
 
-	// Resolve turns a name into addresses. Required: this backend refuses to
-	// resolve anything itself, so that every address it reaches is one the same
-	// resolver produced for the decision.
-	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
-
-	// Allow decides one destination, by full URL. Required.
+	// Decide answers one destination: which addresses it resolved to, and what
+	// the plane decided about it. Required.
 	//
-	// Supplied by `internal/fetch` rather than reached for here, because a
-	// backend that could decide is a backend that could decide differently
-	// from the plane above it, which is invariant 1.
-	Allow func(ctx context.Context, rawURL string, addrs []netip.Addr) decide.Decision
+	// ONE function rather than a resolver and a decider, and the difference is
+	// invariant 1 rather than tidiness. With the two separate this backend held
+	// the join between them, which meant it held the case where resolution
+	// FAILS, which meant it built a `decide.Decision` of its own. A backend
+	// that can construct a verdict is a backend that can construct a different
+	// one from the plane above it, and no comment prevents that. With them
+	// joined, `internal/backend` contains no decision logic at all and
+	// `scripts/no-delegated-decisions.sh` can say so mechanically.
+	Decide func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision)
 
 	// Dial opens a socket to an already-checked address. Nil is ordinary.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -129,7 +130,7 @@ func (c *Chromium) Enforcement() decide.Enforcement { return decide.EnforcementP
 
 // Fetch renders one page.
 func (c *Chromium) Fetch(ctx context.Context, req Request) (Result, error) {
-	if c.Resolve == nil || c.Allow == nil {
+	if c.Decide == nil {
 		return Result{}, errors.New("scopyx: the chromium backend was built without a resolver or " +
 			"a decider, and it will not fetch: deciding for itself is the one thing a backend " +
 			"must not do")
@@ -140,7 +141,7 @@ func (c *Chromium) Fetch(ctx context.Context, req Request) (Result, error) {
 	// The floor. Started before the browser so there is no window in which the
 	// browser exists and its only exit does not.
 	px := &browserproxy.Proxy{
-		Decide:  browserproxy.DeciderFunc(c.decideHost),
+		Decide:  browserproxy.DeciderFunc(c.forProxy),
 		Dial:    c.Dial,
 		Timeout: c.Timeout,
 	}
@@ -239,16 +240,12 @@ func sandboxAdvice(said string) string {
 		"SCOPYX_CHROMIUM_NO_SANDBOX=1, which turns it off and is a decision rather than a fix."
 }
 
-// decideHost is what the proxy asks. It resolves and defers to Allow.
-func (c *Chromium) decideHost(ctx context.Context, scheme, host string) ([]netip.Addr, decide.Decision) {
-	addrs, err := c.Resolve(ctx, host)
-	if err != nil {
-		return nil, decide.Decision{
-			Verdict: decide.DenyAddress,
-			Reason:  "the host could not be resolved: " + err.Error(),
-		}
-	}
-	return addrs, c.Allow(ctx, browserproxy.URLOf(scheme, host), addrs)
+// forProxy adapts the plane's decider to the shape the proxy asks in.
+//
+// It builds the URL and hands it on. No verdict is constructed here and none
+// may be: see the Decide field.
+func (c *Chromium) forProxy(ctx context.Context, scheme, host string) ([]netip.Addr, decide.Decision) {
+	return c.Decide(ctx, browserproxy.URLOf(scheme, host))
 }
 
 type fetchPaused struct {
@@ -344,20 +341,7 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 				return
 			}
 
-			u, err := url.Parse(p.Request.URL)
-			if err != nil {
-				_ = conn.Send(m.SessionID, "Fetch.failRequest",
-					map[string]any{"requestId": p.RequestID, "errorReason": "Aborted"})
-				return
-			}
-
-			addrs, err := c.Resolve(ctx, u.Hostname())
-			var d decide.Decision
-			if err != nil {
-				d = decide.Decision{Verdict: decide.DenyAddress, Reason: err.Error()}
-			} else {
-				d = c.Allow(ctx, p.Request.URL, addrs)
-			}
+			_, d := c.Decide(ctx, p.Request.URL)
 
 			mu.Lock()
 			seen = append(seen, Subresource{URL: p.Request.URL, Blocked: !d.Verdict.Allowed()})

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -67,15 +68,18 @@ func (f *fixture) add(host string, srv *httptest.Server, n int) {
 }
 
 func (f *fixture) apply(c *Chromium, allowDomains []string) {
-	c.Resolve = func(_ context.Context, host string) ([]netip.Addr, error) {
-		a, ok := f.addrOf[host]
-		if !ok {
-			return nil, errors.New("no fixture address for " + host)
+	c.Decide = func(_ context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return nil, decide.Decision{Verdict: decide.DenyScheme, Reason: err.Error()}
 		}
-		return []netip.Addr{netip.MustParseAddr(a)}, nil
-	}
-	c.Allow = func(_ context.Context, rawURL string, addrs []netip.Addr) decide.Decision {
-		return decide.Subresource(rawURL, addrs, allowDomains)
+		a, ok := f.addrOf[u.Hostname()]
+		if !ok {
+			return nil, decide.Decision{Verdict: decide.DenyAddress,
+				Reason: "no fixture address for " + u.Hostname()}
+		}
+		addrs := []netip.Addr{netip.MustParseAddr(a)}
+		return addrs, decide.Subresource(rawURL, addrs, allowDomains)
 	}
 	c.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, _, err := net.SplitHostPort(addr)
