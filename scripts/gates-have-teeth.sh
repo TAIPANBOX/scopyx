@@ -184,6 +184,44 @@ run_case "no-caller-headers: a tool grows a header map" fail \
 open("internal/mcp/server.go","w").write(s + "\n\ntype sneak struct {\n\tHeaders map[string]string `json:\"headers\"`\n}\n")')" \
 	"headers"
 
+# Invariant 1. A backend that can build a verdict can build a different one
+# from the plane above it, and no comment prevents that.
+run_case "no-delegated-decisions: a backend constructs a verdict" fail \
+	'./scripts/no-delegated-decisions.sh' \
+	"$(py 's = open("internal/backend/passthrough.go").read()
+open("internal/backend/passthrough.go","w").write(s + "\n\nvar own = decide.Decision{Verdict: decide.DenyPolicy}\n")')" \
+	"constructs a decide.Decision"
+
+run_case "no-delegated-decisions: a backend reaches for the policy plane" fail \
+	'./scripts/no-delegated-decisions.sh' \
+	"$(py 'edit("internal/backend/external.go", "import (", "import (\n\t_ \"github.com/TAIPANBOX/scopyx/internal/policy\"")')" \
+	"imports internal/policy"
+
+# Invariant 4, and the shape somebody will add on purpose believing it is an
+# improvement.
+run_case "no-warm-context: a client grows a cookie jar" fail \
+	'./scripts/no-warm-context.sh' \
+	"$(py 'edit("internal/pin/pin.go", "Timeout:       timeout,", "Timeout:       timeout,\n\t\tJar:           nil,")')" \
+	"cookie jar"
+
+run_case "no-warm-context: keep-alives come back on" fail \
+	'./scripts/no-warm-context.sh' \
+	"$(py 'edit("internal/pin/pin.go", "DisableKeepAlives:     true,", "DisableKeepAlives:     false,")')" \
+	"no longer disables keep-alives"
+
+run_case "no-warm-context: the browser profile stops being per fetch" fail \
+	'./scripts/no-warm-context.sh' \
+	"$(py 'edit("internal/backend/chromium.go", "os.MkdirTemp", "mkdirTempDisabled")')" \
+	"temporary profile directory"
+
+# Invariant 13. The word arrives in a sentence somebody wrote in a hurry, which
+# is exactly what a grep is the right shape of check for.
+run_case "no-compliance-claims: a README that claims compliance" fail \
+	'./scripts/no-compliance-claims.sh' \
+	"$(py 's = open("README.md").read()
+open("README.md","w").write(s + "\n\nscopyx is GDPR compliant and AI Act compliant.\n")')" \
+	"reads as a claim"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -203,6 +241,21 @@ run_case "one-way-out: a transport in a TEST file" pass \
 	"$(py 's = open("internal/record/record_test.go").read()
 open("internal/record/record_test.go","w").write(s + "\n\n// fixtures may open what they need\n")')"
 
+# Prose naming a forbidden construct is not the construct. These gates read
+# code with the comments stripped, and this repository's comments discuss
+# `decide.Decision` and cookie jars at length on purpose.
+run_case "no-delegated-decisions: a comment that mentions decide.Decision" pass \
+	'./scripts/no-delegated-decisions.sh' \
+	"$(py 'edit("internal/backend/external.go", "package backend",
+     "// A decide.Decision{ built here would be invariant 1 broken from inside.\npackage backend")')"
+
+# And the honest negative form has to stay usable, or the rule cannot be
+# written down anywhere, including in the file that states it.
+run_case "no-compliance-claims: a line that says never to claim it" pass \
+	'./scripts/no-compliance-claims.sh' \
+	"$(py 's = open("README.md").read()
+open("README.md","w").write(s + "\n\nThis is never described as GDPR compliant, because nobody could hold that.\n")')"
+
 echo
 echo "=== and the one this estate learned the hard way ==="
 echo "    a gate whose subject is gone must SAY so, not report OK on nothing"
@@ -212,6 +265,30 @@ run_case "readme-numbers: no README left to read" fail \
 	"$(py 'import subprocess
 subprocess.run(["git", "mv", "README.md", "README.md.disabled"], check=True)')" \
 	"there is no README.md"
+
+run_case "no-compliance-claims: no Markdown left to read" fail \
+	'./scripts/no-compliance-claims.sh' \
+	"$(py 'import subprocess, pathlib
+n = 0
+for f in sorted(pathlib.Path(".").rglob("*.md")):
+    if ".git" in str(f):
+        continue
+    subprocess.run(["git", "mv", str(f), str(f) + ".disabled"], check=True)
+    n += 1
+assert n, "no Markdown in this repo"')" \
+	"measured nothing"
+
+run_case "no-delegated-decisions: no backend files left to read" fail \
+	'./scripts/no-delegated-decisions.sh' \
+	"$(py 'import subprocess, pathlib
+n = 0
+for f in sorted(pathlib.Path("internal/backend").glob("*.go")):
+    if str(f).endswith("_test.go"):
+        continue
+    subprocess.run(["git", "mv", str(f), str(f) + ".disabled"], check=True)
+    n += 1
+assert n, "no backend files"')" \
+	"measured nothing"
 
 run_case "one-way-out: no Go files left to read" fail \
 	'./scripts/one-way-out.sh' \

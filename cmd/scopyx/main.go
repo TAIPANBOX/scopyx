@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -117,9 +118,18 @@ func run(log *slog.Logger) error {
 	// find its own resolver could find a different one, which is invariant 1
 	// broken quietly.
 	if ch, ok := back.(*backend.Chromium); ok {
-		ch.Resolve = systemResolver{}.Resolve
-		ch.Allow = func(ctx context.Context, rawURL string, addrs []netip.Addr) decide.Decision {
-			return decide.Subresource(rawURL, addrs, decide.AllowDomainsFrom(ctx))
+		ch.Decide = func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
+			u, err := url.Parse(rawURL)
+			if err != nil {
+				return nil, decide.Decision{Verdict: decide.DenyScheme,
+					Reason: "the subresource URL could not be parsed: " + err.Error()}
+			}
+			addrs, err := systemResolver{}.Resolve(ctx, u.Hostname())
+			if err != nil {
+				return nil, decide.Decision{Verdict: decide.DenyAddress,
+					Reason: "the host could not be resolved: " + err.Error()}
+			}
+			return addrs, decide.Subresource(rawURL, addrs, decide.AllowDomainsFrom(ctx))
 		}
 	}
 

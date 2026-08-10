@@ -84,6 +84,15 @@ jobs:
       - name: every number the README states
         run: ./scripts/readme-numbers.sh
 
+      - name: no decision is delegated to a backend
+        run: ./scripts/no-delegated-decisions.sh
+
+      - name: nothing outlives a fetch
+        run: ./scripts/no-warm-context.sh
+
+      - name: nothing claims compliance
+        run: ./scripts/no-compliance-claims.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that started writing into the checkout.

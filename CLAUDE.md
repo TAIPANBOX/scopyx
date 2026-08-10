@@ -59,6 +59,9 @@ go build ./...
 ./scripts/no-caller-headers.sh
 ./scripts/one-way-out.sh
 ./scripts/readme-numbers.sh
+./scripts/no-delegated-decisions.sh
+./scripts/no-warm-context.sh
+./scripts/no-compliance-claims.sh
 ./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
 
@@ -99,8 +102,15 @@ an absent invariant.
 
    This is the same reason tokenfuse checks a budget before calling a provider
    rather than reading the provider's own limits.
-   *(not enforced yet: the gate to write is one that refuses a policy decision
-   derived from a backend response field)*
+   *(gate: `scripts/no-delegated-decisions.sh`, which refuses a
+   `decide.Decision` constructed anywhere in `internal/backend`, and refuses
+   that package importing `internal/policy` or `internal/robots`. Writing it
+   changed the code: the chromium backend held one verdict of its own, for the
+   honest reason that it joined a resolver to a decider and had to handle
+   resolution failing. It now takes ONE function that does both, supplied from
+   above, and constructs nothing. What the gate cannot see is a backend that
+   read a vendor's header and quietly returned fewer subresources; what catches
+   that is the fidelity block being nil rather than zero, and a reader.)*
 
 2. **The backend is an adapter and the adapter is the product.** A backend that
    cannot be swapped makes this a browser with extra steps, and ties the whole
@@ -132,8 +142,13 @@ an absent invariant.
    slower than Chromium in wall time. Somebody will propose it as a latency
    fix, it will pass every test, and it will silently destroy cross-page and
    cross-tenant isolation.
-   *(not enforced yet: the gate to write asserts no code path holds a fetch
-   context across two fetches)*
+   *(gate: `scripts/no-warm-context.sh`, four structural checks: no cookie jar
+   anywhere, the browser's profile directory created per fetch and removed
+   rather than named as a constant, keep-alives off in `internal/pin`, and no
+   `http.Client`, `http.Transport` or `cdp.Conn` held in package-level state.
+   What it cannot see is a long-lived struct field carrying a client between
+   two calls of Fetch: the interface makes that awkward rather than impossible,
+   and this raises the cost of the mistake rather than removing it.)*
 
 5. **A result carries what actually happened, and an empty answer is never
    returned as if it were complete.** Bytes extracted, subresources requested,
@@ -328,16 +343,28 @@ an absent invariant.
     Article 12", never "GDPR compliant" or "AI Act compliant". This binds the
     README, the site, PR bodies and release notes equally. A claim nobody can
     hold is worse than no claim, because a reader trusts the whole document on
-    the strength of it. *(not enforced yet: a grep for `compliant` with an
-    allowlist for the honest negative forms is the gate to write)*
+    the strength of it. *(gate: `scripts/no-compliance-claims.sh`, a grep over
+    every tracked Markdown file with an allowlist for the honest negative
+    forms. The allowlist is the design rather than the search: the word has to
+    stay usable or the rule could not be written down, here or in the README,
+    so a line carrying it passes only when it also carries an enumerated
+    negation. A line that fails is not necessarily wrong, it is a sentence
+    somebody has to look at, which is the most a grep can honestly do.)*
 
 ## Decisions that have no gate yet
 
 This list is debt, and it is here to stay visible rather than to be tidy.
 
-Invariants 1, 4 and 13 are mechanically checkable and each is named above with
-the shape of the check it needs. Invariants 2 and 9 are judgement and probably
-stay judgement.
+**Nothing here is now a mechanically checkable invariant without a check.**
+Invariants 1, 4 and 13 were the last three, each named with the shape it
+needed, and each got it on 2026-08-10. Invariants 2 and 9 are judgement and
+stay judgement: what a backend is FOR, and what gets built.
+
+Two of the three changed something while being written, which is the argument
+for writing a gate rather than describing one. Invariant 1's moved a verdict
+out of the chromium backend. Invariant 13's needed its allowlist designed
+before its search, because the word has to stay usable or the rule cannot be
+stated.
 
 Invariant 11 arrived with tests rather than prose, and it took invariant 9's
 one piece of recorded debt with it. Worth noting how that debt behaved: it sat
