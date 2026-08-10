@@ -20,6 +20,7 @@ import (
 	"github.com/TAIPANBOX/scopyx/internal/backend"
 	"github.com/TAIPANBOX/scopyx/internal/decide"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
+	"github.com/TAIPANBOX/scopyx/internal/robots"
 )
 
 // Resolver turns a hostname into the addresses a fetch would actually reach.
@@ -38,6 +39,10 @@ type Deps struct {
 	Resolver Resolver
 	Memo     *policy.Memo
 	Limits   decide.Limits
+
+	// Robots is the site's own stated preference. Nil means not consulted,
+	// which is a configuration rather than a default: see internal/robots.
+	Robots *robots.Cache
 }
 
 // Refusal is a fetch that did not happen, and why.
@@ -114,6 +119,24 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 		}
 		if !dec.Verdict.Allowed() {
 			return Result{}, &Refusal{Decision: dec}
+		}
+
+		// The site's own preference, asked AFTER the operator's policy and
+		// before the fetch. The order is deliberate: a destination the
+		// operator forbids is refused without this plane fetching anything
+		// from it at all, not even its robots.txt, so a refused domain never
+		// learns it was asked about.
+		//
+		// Every hop is checked, not only the first. A redirect to a path the
+		// target disallows is exactly as disallowed as asking for it directly.
+		if d.Robots != nil {
+			r := d.Robots.Check(ctx, u.Scheme, u.Host, u.EscapedPath())
+			if !r.Allowed {
+				return Result{}, &Refusal{Decision: decide.Decision{
+					Verdict: decide.DenyRobots,
+					Reason:  r.Reason,
+				}}
+			}
 		}
 
 		res, err := d.Backend.Fetch(ctx, current)

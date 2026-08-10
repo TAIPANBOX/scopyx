@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/TAIPANBOX/scopyx/internal/mcp"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
 	"github.com/TAIPANBOX/scopyx/internal/record"
+	"github.com/TAIPANBOX/scopyx/internal/robots"
 )
 
 // # WHY THIS TEST NEEDS A DIALER OF ITS OWN
@@ -55,10 +57,30 @@ func (metadataResolver) Resolve(context.Context, string) ([]netip.Addr, error) {
 }
 
 type harness struct {
-	mcpSrv  *httptest.Server
-	target  *httptest.Server
-	hits    chan string
-	journal string
+	mcpSrv     *httptest.Server
+	target     *httptest.Server
+	hits       chan string
+	journal    string
+	robotsBody atomic.Value
+}
+
+// robots sets what the fixture serves at /robots.txt. Unset is a 404, which is
+// a reading rather than a failure.
+func (h *harness) robots(body string) { h.robotsBody.Store(body) }
+
+// paths drains what the target was asked for within d.
+func (h *harness) paths(t *testing.T, d time.Duration) []string {
+	t.Helper()
+	var out []string
+	deadline := time.After(d)
+	for {
+		select {
+		case p := <-h.hits:
+			out = append(out, p)
+		case <-deadline:
+			return out
+		}
+	}
 }
 
 // newHarness stands up the whole plane: a policy plane, a target web server,
@@ -74,6 +96,15 @@ func newHarness(t *testing.T, decision string, res interface {
 		select {
 		case h.hits <- r.URL.Path:
 		default:
+		}
+		if r.URL.Path == "/robots.txt" {
+			body := h.robotsBody.Load()
+			if body == nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = io.WriteString(w, body.(string))
+			return
 		}
 		_, _ = io.WriteString(w, "the page the agent asked for")
 	}))
@@ -103,8 +134,12 @@ func newHarness(t *testing.T, decision string, res interface {
 	}
 	t.Cleanup(func() { _ = j.Close() })
 
+	// The robots client shares the backend's transport, which is the same
+	// arrangement main.go makes: robots.txt is fetched from the origin that
+	// was just decided, over the same route the fetch itself will take.
 	g := &governed{
 		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		robots:   robots.New(robots.ModeReport, 0, &http.Client{Timeout: 3 * time.Second, Transport: pass.HTTP.Transport}),
 		backend:  pass,
 		pdp:      policy.New(pdp.URL, "k", time.Second),
 		journal:  j,
@@ -168,13 +203,18 @@ func TestAnAllowedFetchGoesEndToEndAndIsRecorded(t *testing.T) {
 		t.Errorf("the body did not come back: %v", res["content"])
 	}
 
-	select {
-	case path := <-h.hits:
-		if path != "/report" {
-			t.Errorf("the target saw %q", path)
+	// The target sees TWO requests now: its own robots.txt, then the page.
+	// Asserted as a set rather than in order, because the order is this
+	// plane's business and the test should not pin it.
+	seen := h.paths(t, 2*time.Second)
+	var gotPage bool
+	for _, p := range seen {
+		if p == "/report" {
+			gotPage = true
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("the target was never reached")
+	}
+	if !gotPage {
+		t.Fatalf("the target was never asked for the page, saw %v", seen)
 	}
 
 	evs := h.events(t)
@@ -318,4 +358,57 @@ func firstText(t *testing.T, res map[string]any) string {
 	first, _ := content[0].(map[string]any)
 	s, _ := first["text"].(string)
 	return s
+}
+
+// ---------------------------------------------------------------------------
+// robots.txt, end to end
+// ---------------------------------------------------------------------------
+
+// The claim invariant 9 made and nothing held until 2026-08-10. Asserted
+// against what the TARGET saw, because "the fetch was refused" is equally true
+// when the fetch happened and the answer was discarded.
+func TestADisallowedPathIsRefusedAndTheTargetNeverSeesIt(t *testing.T) {
+	h := newHarness(t, "allow", publicResolver{})
+	h.robots("User-agent: *\nDisallow: /private/\n")
+
+	out := h.call(t, "k1", "http://example.com/private/report")
+	res, _ := out["result"].(map[string]any)
+	if res["isError"] != true {
+		t.Fatalf("a disallowed path must be refused, got %v", out)
+	}
+	if txt := firstText(t, res); !strings.Contains(txt, "deny_robots") {
+		t.Errorf("the agent must be told which refusal it was, got %q", txt)
+	}
+
+	// The target saw the robots.txt request and nothing else.
+	seen := h.paths(t, 400*time.Millisecond)
+	for _, p := range seen {
+		if p != "/robots.txt" {
+			t.Errorf("the target was asked for %q despite its own robots.txt", p)
+		}
+	}
+}
+
+// A site's preference is asked AFTER the operator's policy, so a destination
+// the operator forbids never learns it was asked about.
+func TestADomainThePolicyRefusesIsNotEvenAskedForItsRobots(t *testing.T) {
+	h := newHarness(t, "deny", publicResolver{})
+	h.robots("User-agent: *\nDisallow: /private/\n")
+
+	h.call(t, "k1", "http://example.com/anything")
+	if seen := h.paths(t, 400*time.Millisecond); len(seen) != 0 {
+		t.Errorf("a policy-refused domain was contacted anyway, at %v", seen)
+	}
+}
+
+// An allowed path still goes through.
+func TestAPathRobotsAllowsIsFetched(t *testing.T) {
+	h := newHarness(t, "allow", publicResolver{})
+	h.robots("User-agent: *\nDisallow: /private/\n")
+
+	out := h.call(t, "k1", "http://example.com/public/report")
+	res, _ := out["result"].(map[string]any)
+	if res["isError"] == true {
+		t.Fatalf("an allowed path must be fetched: %v", res["content"])
+	}
 }

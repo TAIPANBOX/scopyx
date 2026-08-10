@@ -33,6 +33,7 @@ import (
 	"github.com/TAIPANBOX/scopyx/internal/mcp"
 	"github.com/TAIPANBOX/scopyx/internal/policy"
 	"github.com/TAIPANBOX/scopyx/internal/record"
+	"github.com/TAIPANBOX/scopyx/internal/robots"
 )
 
 // version is stamped by the build.
@@ -103,6 +104,29 @@ func run(log *slog.Logger) error {
 		}
 	}()
 
+	// The site's own preference. On by default, because invariant 9 says this
+	// plane governs evasion and never supplies it, and ignoring a site's
+	// stated wishes is the cheapest kind of supplying it.
+	//
+	// `report` is the default and NOT the crawler posture: an unreadable
+	// robots.txt allows and says it could not be read, because letting a
+	// site's 500 stop an operator's own governed work hands any origin a way
+	// to deny service to the agents fetching it. `strict` is there for an
+	// operator who wants the crawler behaviour.
+	var robotsMode robots.Mode
+	switch v := env("SCOPYX_ROBOTS", "report"); v {
+	case "report":
+		robotsMode = robots.ModeReport
+	case "strict":
+		robotsMode = robots.ModeStrict
+	case "off":
+		robotsMode = robots.ModeOff
+	default:
+		return fmt.Errorf("SCOPYX_ROBOTS=%q is not one this build knows. "+
+			"report (the default: an unreadable robots.txt allows, and the result says so), "+
+			"strict (an unreadable robots.txt refuses), or off", v)
+	}
+
 	perHour := envInt("SCOPYX_MAX_FETCHES_PER_HOUR", defaultFetchesPerHour)
 	g := &governed{
 		log:     log,
@@ -115,6 +139,20 @@ func run(log *slog.Logger) error {
 		},
 		cap:      newHourlyCap(perHour),
 		resolver: systemResolver{},
+		// nil client, so robots gets its own with a bounded timeout.
+		//
+		// WHAT THIS DOES NOT CLOSE, written down rather than left to be found.
+		// The robots.txt request resolves the host again, independently of the
+		// lookup the decision was made on. A name that answered with a public
+		// address for the decision and a private one microseconds later would
+		// be fetched by this client without the address checks seeing it. The
+		// window is small and it is real.
+		//
+		// It is not closed here because closing it properly means pinning the
+		// dialer to the address `internal/fetch` already resolved, which is a
+		// change to how every backend is constructed rather than a line in
+		// this one. Recorded in CLAUDE.md as debt rather than fixed badly.
+		robots: robots.New(robotsMode, 0, nil),
 	}
 
 	srv := &http.Server{
@@ -129,6 +167,7 @@ func run(log *slog.Logger) error {
 		"policy_plane", pdpURL,
 		"credentials_required", keys.Configured(),
 		"journal", journalState(os.Getenv("SCOPYX_EVENTS")),
+		"robots", env("SCOPYX_ROBOTS", "report"),
 		"fetches_per_hour", capState(perHour))
 
 	// Said out loud rather than left in a config file nobody re-reads. An
@@ -206,6 +245,8 @@ type governed struct {
 	limits  decide.Limits
 	cap     *hourlyCap
 
+	robots *robots.Cache
+
 	// resolver is a field rather than a call to the system one, and the reason
 	// is that the end-to-end test could not otherwise exist: every httptest
 	// server is on loopback, and `decide` refuses loopback, correctly. A test
@@ -234,6 +275,7 @@ func (g *governed) Fetch(ctx context.Context, c mcp.Call) (mcp.Answer, error) {
 		Resolver: g.resolver,
 		Memo:     memo,
 		Limits:   g.limits,
+		Robots:   g.robots,
 	}, backend.Request{URL: c.URL, Extract: c.Extract, WaitFor: c.WaitFor})
 
 	if err != nil {

@@ -171,7 +171,14 @@ believes their header was sent.
 
 No stealth, no CAPTCHA solving, no TLS-fingerprint matching, no bulk crawl, no
 image harvesting. It identifies itself as
-`scopyx/1` and never as a browser.
+`scopyx/1` and never as a browser, and it honours `robots.txt`.
+
+**An unreadable `robots.txt` allows, and the result says it could not be read.**
+That is not the crawler posture and it is deliberate: crawler guidance treats a
+5xx as a complete disallow, which is right when you are about to make ten
+thousand requests and wrong for one agent reading one page, because it hands any
+origin a way to deny service to the agents fetching it. Set
+`SCOPYX_ROBOTS=strict` for the crawler behaviour, or `off` to not ask.
 
 Two of those are positioning and two are law-shaped. This is defensive tooling
 for an operator governing their own agents, and a component that defeated a
