@@ -170,7 +170,7 @@ believes their header was sent.
 ## What it will not do
 
 No stealth, no CAPTCHA solving, no TLS-fingerprint matching, no bulk crawl, no
-image harvesting. `robots.txt` is honoured by default. It identifies itself as
+image harvesting. It identifies itself as
 `scopyx/1` and never as a browser.
 
 Two of those are positioning and two are law-shaped. This is defensive tooling
