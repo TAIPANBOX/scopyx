@@ -68,9 +68,11 @@ with no subject, and is refused with a reason saying exactly that.
 | `SCOPYX_KEYS` | none | `key=agent://domain/name`, comma separated |
 | `SCOPYX_WARDRYX` | **required** | the policy plane's base URL |
 | `SCOPYX_WARDRYX_KEY` | none | this service's credential for the policy plane |
-| `SCOPYX_BACKEND` | `passthrough` | `passthrough` or `external` |
+| `SCOPYX_BACKEND` | `passthrough` | `passthrough`, `external` or `chromium` |
 | `SCOPYX_EXTERNAL_ENDPOINT` | none | your own fetching service, for `external` |
 | `SCOPYX_EXTERNAL_KEY` | none | your credential for your own service |
+| `SCOPYX_CHROMIUM` | found on PATH | path to the browser, for `chromium` |
+| `SCOPYX_CHROMIUM_NO_SANDBOX` | unset | turns off the browser's own sandbox, see below |
 | `SCOPYX_EVENTS` | none (no record) | path to this plane's own journal |
 | `SCOPYX_RETAIN` | none | `payload` to keep full URLs, see below |
 | `SCOPYX_MAX_BYTES` | 32 MiB | body cap |
@@ -114,6 +116,52 @@ never appears in your bill for it either.
 service fetches the page and hands back what it got, so there is no moment at
 which this plane could refuse an image on a forbidden host. Every result says
 which of the two guarantees was in force, and never claims the stronger one.
+
+**`chromium`** drives a browser you installed. It runs the page's JavaScript,
+so a document assembled in the browser arrives assembled, and it is the only
+backend for which `per_request` is a measurement rather than a definition:
+`passthrough` is per-request because it makes exactly one request, and a page
+is a document plus forty others.
+
+Nothing is bundled and nothing is downloaded. The image stays distroless and
+small, and a missing browser is refused at startup with a message about the
+browser rather than at the first fetch with a message about the network.
+
+### How the browser is boxed in
+
+The browser is launched with `--proxy-server` pointing at a proxy this process
+owns, and `--proxy-bypass-list=<-loopback>`, which removes even Chrome's own
+bypass for localhost. That proxy refuses any destination the plane did not
+decide. It is the floor, and it holds because it is a socket that is not
+opened.
+
+CDP request interception runs on top of it and is not the enforcement. It sees
+the full URL of every request including inside TLS, which the proxy cannot, so
+it produces the counts and the per-URL decisions. But it is the browser's
+cooperation, and cooperation is a thing a bug, a flag or a version can
+withdraw.
+
+The two were measured separately: with interception removed the refused
+subresource's server is still never reached, with the proxy decision removed it
+is still never reached, and with both removed it is reached once and the test
+goes red.
+
+**The sandbox is the browser's, and turning it off is a decision.** In a
+container Chrome often cannot get the user namespaces its renderer sandbox
+needs, and it refuses to start. `SCOPYX_CHROMIUM_NO_SANDBOX=1` removes that
+requirement, and it removes the thing standing between a hostile page and the
+process rendering it. That page is attacker-controlled by definition: this
+plane exists because agents read pages that tell them what to do next. The
+better way out is usually to run as a user whose namespaces work, which keeps
+the sandbox, and the error says both.
+
+Three things it does not do. **No TLS interception**, ever: minting
+certificates for other people's sites would put a private CA on your box and
+build the capability this plane exists to bound. **No debugging port**: the
+protocol runs over an inherited pipe, because a debugging port is an
+unauthenticated remote-control channel for the browser fetching on your behalf.
+**No warm browser**: a fresh profile directory per fetch, removed after, so no
+cookie jar, cache or storage partition is shared between two fetches.
 
 ## Every answer says what actually happened
 
