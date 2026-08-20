@@ -100,10 +100,33 @@ func TestTheSearchOrderIsTheOneCandidatesDeclares(t *testing.T) {
 	if !ok {
 		t.Fatal("Find found nothing with every candidate on PATH")
 	}
-	if want := filepath.Join(dir, Candidates[0]); got != want {
-		t.Fatalf("Find chose %q, want %q. The order in Candidates is a decision "+
-			"with a reason written next to it, and this is what holds it",
+	// "chromium" written out, not Candidates[0]. The first version compared
+	// against Candidates[0] and so took its expectation from the same slice it
+	// was testing: reversing the order moved the expectation with it and the
+	// test stayed green. Found by reversing it and watching nothing happen.
+	if want := filepath.Join(dir, "chromium"); got != want {
+		t.Fatalf("Find chose %q, want %q. Chromium is preferred because a "+
+			"machine with both usually has Chromium since somebody wanted a "+
+			"headless browser, and Chrome since somebody wanted a browser",
 			got, want)
+	}
+}
+
+// The list itself, written out. Candidates is read by anything that reports
+// what scopyx looked for, so a name added, dropped or reordered is a change to
+// documented behaviour rather than an implementation detail.
+func TestCandidatesAreTheFourNamesInTheDocumentedOrder(t *testing.T) {
+	want := []string{
+		"chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+	}
+	if len(Candidates) != len(want) {
+		t.Fatalf("Candidates = %v, want %v", Candidates, want)
+	}
+	for i := range want {
+		if Candidates[i] != want[i] {
+			t.Fatalf("Candidates[%d] = %q, want %q. Candidates = %v",
+				i, Candidates[i], want[i], Candidates)
+		}
 	}
 }
 
