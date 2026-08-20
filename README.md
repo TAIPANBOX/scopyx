@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml/badge.svg)](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/go-1.26-00ADD8.svg)
-![tests](https://img.shields.io/badge/tests-168-brightgreen.svg)
+![tests](https://img.shields.io/badge/tests-190-brightgreen.svg)
 ![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
