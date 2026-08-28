@@ -29,7 +29,7 @@ jobs:
           # Matches `toolchain` in go.mod. These two disagreeing is not
           # cosmetic: setup-go pins GOTOOLCHAIN=local, so a mismatch stops
           # being a silent extra download and becomes a hard failure.
-          go-version: "1.26.7"
+          go-version: "1.27.0"
           cache: true
 
       - name: gofmt
@@ -149,7 +149,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.7"
+          go-version: "1.27.0"
           cache: true
       - name: govulncheck
         run: |

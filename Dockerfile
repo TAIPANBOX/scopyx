@@ -15,7 +15,7 @@
 # the default in Docker 23+ and in Docker Desktop; a host without it needs
 # `docker buildx build`, or drop the `--platform=` below and lose only the
 # cross-compile.
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 ENV GOTOOLCHAIN=auto
