@@ -1,0 +1,115 @@
+{
+  "$comment": [
+    "What this repository contributes to a running stack, and what a check may",
+    "believe about it. `checked` is proved against this repository by",
+    "internal/manifest/manifest_test.go in this repository's own CI; `declared` is",
+    "a statement nobody can verify and carries its own `why`.",
+    "",
+    "IT REFUSES TO BE AN OPEN PROXY, AND THAT REFUSAL RUNS BEFORE ANYTHING BINDS.",
+    "A non-loopback bind with no credential is an unauthenticated fetch proxy on",
+    "somebody's network, and the failure is silent: it works perfectly for",
+    "whoever finds it. So the check is a matrix rather than a sentence, and all",
+    "four corners are run:",
+    "",
+    "  loopback, no keys                      starts",
+    "  0.0.0.0, no keys                       REFUSES, exit 1",
+    "  0.0.0.0, no keys, ALLOW_OPEN_BIND=1    starts, because somebody said so",
+    "  0.0.0.0, with keys                     starts, because there is a credential",
+    "",
+    "The two escapes are the point. A check that only proved the refusal would",
+    "pass just as well on a component that refuses ALWAYS, which would be a",
+    "different and broken thing.",
+    "",
+    "IT ALSO REFUSES WITHOUT A POLICY PLANE, and the code says why in its own",
+    "words: it fails closed, so an unconfigured one would refuse every fetch with",
+    "a message about the network instead of about the configuration. That is the",
+    "only unconditionally required variable of seventeen.",
+    "",
+    "NO HEALTH PATH IS DECLARED BECAUSE THERE IS NONE. Its surface is an MCP",
+    "server, and no launcher polls it: stack-up registers the pid and moves on,",
+    "stack-single gives the service no healthcheck. Declaring one would be a",
+    "sentence a launcher could act on and be wrong."
+  ],
+  "schema": "taipanbox.dev/components/v1",
+  "repo": "TAIPANBOX/scopyx",
+  "components": [
+    {
+      "name": "scopyx",
+      "class": "service",
+      "checked": {
+        "package": "github.com/TAIPANBOX/scopyx/cmd/scopyx",
+        "listen_default": "127.0.0.1:4300",
+        "env": {
+          "SCOPYX_ADDR": {
+            "required": false,
+            "default": "127.0.0.1:4300"
+          },
+          "SCOPYX_ALLOW_OPEN_BIND": {
+            "required": false
+          },
+          "SCOPYX_BACKEND": {
+            "required": false
+          },
+          "SCOPYX_CHROMIUM": {
+            "required": false
+          },
+          "SCOPYX_CHROMIUM_NO_SANDBOX": {
+            "required": false
+          },
+          "SCOPYX_EVENTS": {
+            "required": false
+          },
+          "SCOPYX_EXTERNAL_ENDPOINT": {
+            "required": false
+          },
+          "SCOPYX_EXTERNAL_KEY": {
+            "required": false
+          },
+          "SCOPYX_EXTERNAL_LABEL": {
+            "required": false
+          },
+          "SCOPYX_KEYS": {
+            "required": false
+          },
+          "SCOPYX_MAX_BYTES": {
+            "required": false
+          },
+          "SCOPYX_MAX_FETCHES_PER_HOUR": {
+            "required": false
+          },
+          "SCOPYX_MAX_REDIRECTS": {
+            "required": false
+          },
+          "SCOPYX_RETAIN": {
+            "required": false
+          },
+          "SCOPYX_ROBOTS": {
+            "required": false
+          },
+          "SCOPYX_WARDRYX": {
+            "required": true
+          },
+          "SCOPYX_WARDRYX_KEY": {
+            "required": false
+          }
+        },
+        "missing_required_exit_code": 1,
+        "refuses_an_open_bind_without_a_credential": {
+          "exit_code": 1,
+          "escaped_by_a_key": "SCOPYX_KEYS",
+          "escaped_by_saying_so": "SCOPYX_ALLOW_OPEN_BIND"
+        }
+      },
+      "declared": {
+        "the_browser_backend_is_a_separate_image": {
+          "value": "SCOPYX_CHROMIUM",
+          "why": "The chromium backend needs a browser this binary does not carry, which is why stack-single builds `stack/scopyx-browser:dev` only when asked and calls it a separate compose profile. Not checked here because the claim would be about an image built in another repository."
+        },
+        "the_deployments_bind_it_wider_on_purpose": {
+          "value": "0.0.0.0",
+          "why": "A container reaches its peers on no other interface, so both server deployments bind wide and supply SCOPYX_KEYS. That is the fourth row of the matrix above rather than an exception to it: the refusal is about a bind with NO credential, not about the bind."
+        }
+      }
+    }
+  ]
+}
