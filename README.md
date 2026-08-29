@@ -10,7 +10,7 @@
 ![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
-<img src="assets/diagram.svg" alt="One request through scopyx: it clears the scheme and the host gates and is refused at the address gate, while the policy gate and the robots.txt gate are never reached, because the address rules sit before the policy that would have allowed it" width="960">
+<img src="assets/diagram.svg" alt="Five gates in order: a scheme we allow, a host you permit, every address the name resolves to, your policy plane and last the site's own robots.txt. The first three are answered without leaving the process, so a refusal there costs no socket and no packet; a destination your policy refuses is never contacted at all, and a 302 is returned rather than followed because a redirect is a destination nobody named" width="960">
 
 <sub>The same argument on <a href="https://it-rat.com/services/scopyx.html">it-rat.com</a>, where you can pick which request to send and watch where it stops.</sub>
 
