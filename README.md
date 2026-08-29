@@ -38,6 +38,17 @@ it belongs in a backend somebody else maintains.
 
 <!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 168 on 2026-08-20 -->
 
+<div align="center">
+
+<img src="docs/gates.png" alt="scopyx gate order: one request clears the scheme and host gates, is refused at the address gate, and never reaches the policy or robots gates" width="960">
+
+<sub>The same order on <a href="https://it-rat.com/services/scopyx.html">it-rat.com</a>, where you can pick a request and watch where it stops.</sub>
+
+</div>
+
+
+---
+
 ## Where this fits in the stack
 
 scopyx is the egress plane of the TAIPANBOX agent-governance stack. Every other
@@ -373,3 +384,16 @@ reader trusts the whole document on the strength of it.
 ## Licence
 
 Apache-2.0.
+
+## Status
+
+- [x] Five gates in one fixed order, and every answer names the gate that stopped it
+- [x] The address gate before the policy gate, so a name cannot smuggle an address
+- [x] Origins recorded, never the path or the query string
+- [x] Identity comes from the credential, and the tool takes a URL and never a header
+- [x] Runs standalone, with no other plane required
+- [ ] A browser is out of scope, on purpose: this decides, it does not fetch
+
+## Licence
+
+Apache-2.0, like the rest of the stack. See [LICENSE](./LICENSE).
