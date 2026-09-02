@@ -5,9 +5,9 @@
 #
 # **Immutable versions, no moving tag.** There is deliberately no `:latest` and
 # no `:main`: this is the egress enforcement point for a governance stack, and
-# running" has to have an answer that does not change under the operator. A tag
-# that moves is a deployment whose contents change without a rollout anybody
-# recorded (Yurii, 2026-08-02).
+# "which build is running" has to have an answer that does not change under
+# the operator. A tag that moves is a deployment whose contents change without
+# a rollout anybody recorded (Yurii, 2026-08-02).
 #
 # Runs on a tag, never on a merge. Publishing on every push to main would mint
 # artifacts nobody chose to release.
