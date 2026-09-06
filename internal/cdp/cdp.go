@@ -100,11 +100,14 @@ func Launch(ctx context.Context, exe string, args ...string) (*Conn, error) {
 	}
 	weRead, fromChild, err := os.Pipe()
 	if err != nil {
-		toChild.Close()
-		weWrite.Close()
+		_ = toChild.Close()
+		_ = weWrite.Close()
 		return nil, err
 	}
 
+	// #nosec G204 -- operator configuration, invariant 12: exe is the browser
+	// path this plane is documented to launch, the same trust boundary as the
+	// SCOPYX_CHROMIUM path checked in internal/cdp/find.go.
 	cmd := exec.CommandContext(ctx, exe, append([]string{"--remote-debugging-pipe"}, args...)...)
 	// fd 3 is what the browser reads, fd 4 is what it writes.
 	cmd.ExtraFiles = []*os.File{toChild, fromChild}
@@ -119,16 +122,16 @@ func Launch(ctx context.Context, exe string, args ...string) (*Conn, error) {
 	tail := &ring{max: 8 << 10}
 	cmd.Stderr = tail
 	if err := cmd.Start(); err != nil {
-		toChild.Close()
-		weWrite.Close()
-		weRead.Close()
-		fromChild.Close()
+		_ = toChild.Close()
+		_ = weWrite.Close()
+		_ = weRead.Close()
+		_ = fromChild.Close()
 		return nil, fmt.Errorf("cdp: could not start %s: %w", exe, err)
 	}
 	// Our copies of the child's ends are closed, so a browser that exits gives
 	// us EOF instead of a read that blocks until the context expires.
-	toChild.Close()
-	fromChild.Close()
+	_ = toChild.Close()
+	_ = fromChild.Close()
 
 	c := &Conn{w: weWrite, r: weRead, cmd: cmd, stderr: tail, waiting: map[int64]chan Message{}}
 	go c.read()
@@ -311,8 +314,8 @@ func (c *Conn) Close() error {
 	c.closed = true
 	c.mu.Unlock()
 
-	c.w.Close()
-	c.r.Close()
+	_ = c.w.Close()
+	_ = c.r.Close()
 	if c.cmd != nil && c.cmd.Process != nil {
 		_ = c.cmd.Process.Kill()
 		_ = c.cmd.Wait()

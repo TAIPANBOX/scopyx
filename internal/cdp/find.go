@@ -28,6 +28,10 @@ var macCandidates = []string{
 // configured would be a fetch nobody can reproduce.
 func Find() (string, bool) {
 	if p := os.Getenv("SCOPYX_CHROMIUM"); p != "" {
+		// #nosec G304 G703 -- operator configuration, invariant 12: this is the
+		// path the operator named to run the browser this plane drives, the
+		// same trust boundary as the browser launch itself. Two rule IDs
+		// because gosec has named this check both across versions.
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p, true
 		}
