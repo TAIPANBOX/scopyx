@@ -32,6 +32,7 @@
   ],
   "schema": "taipanbox.dev/components/v1",
   "repo": "TAIPANBOX/scopyx",
+  "distribution": "ghcr.io/taipanbox/scopyx, per tag also scopyx:<tag>-chromium",
   "components": [
     {
       "name": "scopyx",

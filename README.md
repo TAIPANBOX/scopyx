@@ -93,6 +93,23 @@ From source, if you would rather:
 go build ./cmd/scopyx && SCOPYX_WARDRYX=http://localhost:8080 ./scopyx
 ```
 
+## Verify the image
+
+Every release is signed keyless with Sigstore and carries a build-provenance
+attestation and an SBOM. With `cosign` and `gh` installed:
+
+```sh
+cosign verify ghcr.io/taipanbox/scopyx:<tag> \
+  --certificate-identity-regexp '^https://github.com/TAIPANBOX/scopyx/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/taipanbox/scopyx:<tag> -R TAIPANBOX/scopyx
+```
+
+The same for the browser variant: replace `scopyx:<tag>` with
+`scopyx:<tag>-chromium`.
+
+Releases through v0.1.2 have none of this; the tags say so.
+
 ## The identity comes from the credential
 
 `SCOPYX_KEYS` maps a credential to the agent it belongs to:
