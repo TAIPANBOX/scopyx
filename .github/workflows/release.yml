@@ -28,7 +28,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # Proves the Dockerfile itself still builds, both targets, on a pull request
@@ -40,6 +39,11 @@ jobs:
   # stage sits last), and only building both here would leave a reorder
   # visible on a tag and invisible on the pull request meant to catch it.
   image-build:
+    # Pushes to the registry by digest, so it needs the package scope the
+    # top level no longer grants; `contents: read` repeated for the checkout.
+    permissions:
+      contents: read
+      packages: write
     name: build image (no push)
     runs-on: ubuntu-latest
     steps:
