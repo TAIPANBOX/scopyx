@@ -1,0 +1,56 @@
+{
+  "schema": "taipanbox.dev/compat/v1",
+  "repo": "TAIPANBOX/scopyx",
+  "major": 1,
+  "status": "proposed: this repository is at 0.x (v0.1.2), and the surface named here is what its 1.0 freezes; the gate holds it from today so that 1.0 is a tag and not a rewrite",
+  "frozen": {
+    "mcp.methods": ["initialize", "tools/list", "tools/call"],
+    "mcp.tools": ["browse"],
+    "mcp.tool_arguments": ["url", "extract", "wait_for"],
+    "mcp.extract_values": ["text", "html", "screenshot"],
+    "http.auth_header": ["X-Scopyx-Key"],
+    "env": [
+      "SCOPYX_ADDR",
+      "SCOPYX_KEYS",
+      "SCOPYX_ALLOW_OPEN_BIND",
+      "SCOPYX_WARDRYX",
+      "SCOPYX_WARDRYX_KEY",
+      "SCOPYX_BACKEND",
+      "SCOPYX_EXTERNAL_ENDPOINT",
+      "SCOPYX_EXTERNAL_KEY",
+      "SCOPYX_EXTERNAL_LABEL",
+      "SCOPYX_CHROMIUM",
+      "SCOPYX_CHROMIUM_NO_SANDBOX",
+      "SCOPYX_EVENTS",
+      "SCOPYX_RETAIN",
+      "SCOPYX_MAX_BYTES",
+      "SCOPYX_MAX_REDIRECTS",
+      "SCOPYX_MAX_FETCHES_PER_HOUR",
+      "SCOPYX_ROBOTS"
+    ],
+    "env.backend_values": ["passthrough", "external", "chromium"],
+    "env.robots_values": ["report", "strict", "off"],
+    "agentevent.emitted": ["web_fetch", "web_blocked"]
+  },
+  "where": {
+    "mcp.methods": ["internal/mcp/server.go"],
+    "mcp.tools": ["internal/mcp/tools.go"],
+    "mcp.tool_arguments": ["internal/mcp/tools.go"],
+    "mcp.extract_values": ["internal/mcp/tools.go"],
+    "http.auth_header": ["internal/mcp/door.go"],
+    "env": ["cmd/scopyx/main.go"],
+    "env.backend_values": ["cmd/scopyx/main.go"],
+    "env.robots_values": ["cmd/scopyx/main.go"],
+    "agentevent.emitted": ["internal/record/record.go"]
+  },
+  "additive": [
+    "new tools under tools/list, and new optional arguments on browse",
+    "new event types under source scopyx (agent-passport SPEC 6.2 allows them within a source)",
+    "new SCOPYX_* names with a default that keeps today's behaviour",
+    "the two image variants (scopyx:<tag> and scopyx:<tag>-chromium) stay; a third may appear"
+  ],
+  "experimental": [
+    "the chromium backend's CDP details (SCOPYX_CHROMIUM, SCOPYX_CHROMIUM_NO_SANDBOX): the browser it drives and how it finds it",
+    "the external backend's request shape (SCOPYX_EXTERNAL_*)"
+  ]
+}
