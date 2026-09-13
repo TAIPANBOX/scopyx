@@ -301,6 +301,60 @@ assert n, "no Go files in this repo"')" \
 	"measured nothing"
 
 echo
+echo "=== compat-surface: the 1.0 promise is present in the code and rendered ==="
+
+# An MCP method the server stops answering: the plainest way a promise breaks.
+run_case "compat-surface: a frozen MCP method gone from the server" fail \
+	'./scripts/compat-surface.sh' \
+	"$(py 'edit("internal/mcp/server.go", "\"tools/list\"", "\"tools/enumerate\"")')" \
+	"'tools/list' is promised"
+
+# An environment name the process stops reading. SCOPYX_RETAIN is read once.
+run_case "compat-surface: an env name gone from main" fail \
+	'./scripts/compat-surface.sh' \
+	"$(py 'edit("cmd/scopyx/main.go", "\"SCOPYX_RETAIN\"", "\"SCOPYX_KEEP\"")')" \
+	"'SCOPYX_RETAIN' is promised"
+
+# An event type renamed at its one definition site.
+run_case "compat-surface: an emitted event type renamed" fail \
+	'./scripts/compat-surface.sh' \
+	"$(py 'edit("internal/record/record.go", "\"web_blocked\"", "\"web_refused\"")')" \
+	"'web_blocked' is promised"
+
+# The human form edited by hand rather than rendered.
+run_case "compat-surface: COMPATIBILITY.md edited by hand" fail \
+	'./scripts/compat-surface.sh' \
+	"$(py 'edit("COMPATIBILITY.md", "# Compatibility", "# Compatibility (hand-edited)")')" \
+	"is not the rendering of"
+
+# An additive name is documentation and is never checked against the code.
+run_case "compat-surface: an additive name added" pass \
+	'./scripts/compat-surface.sh' \
+	"$(cat <<'PY'
+import json
+import subprocess
+
+p = "compat/1.0.json"
+m = json.load(open(p))
+m["additive"].append("a teeth-test additive name, never checked against the code")
+json.dump(m, open(p, "w"), indent=2)
+open(p, "a").write("\n")
+r = subprocess.run(["./scripts/compat-surface.sh", "--write"], capture_output=True, text=True)
+assert r.returncode == 0, "regenerating after the additive edit failed:\n" + r.stdout + r.stderr
+PY
+)"
+
+# The manifest itself gone: measured nothing, never a pass on an absent promise.
+run_case "compat-surface: the manifest is gone" fail \
+	'./scripts/compat-surface.sh' \
+	"$(cat <<'PY'
+import os
+os.remove("compat/1.0.json")
+PY
+)" \
+	"measured nothing"
+
+echo
 if [ -n "$(git status --porcelain)" ]; then
 	printf 'FAIL: this script left the tree dirty, so it cannot be trusted about anything above\n'
 	git status --porcelain | head -5

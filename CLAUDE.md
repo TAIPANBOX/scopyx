@@ -62,6 +62,7 @@ go build ./...
 ./scripts/no-delegated-decisions.sh
 ./scripts/no-warm-context.sh
 ./scripts/no-compliance-claims.sh
+./scripts/compat-surface.sh      # invariant 14; compat/1.0.json against the code, COMPATIBILITY.md rendered
 ./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
 
@@ -364,6 +365,38 @@ an absent invariant.
     so a line carrying it passes only when it also carries an enumerated
     negation. A line that fails is not necessarily wrong, it is a sentence
     somebody has to look at, which is the most a grep can honestly do.)*
+
+14. **The surface `compat/1.0.json` promises is present in the code, and
+    `COMPATIBILITY.md` is rendered from it, never typed.** SemVer's item 5:
+    version 1.0.0 defines the public API, so a 1.0 is a promise about a
+    surface, and a promise nobody can point at is a mood. The estate's first
+    1.0 tags (agent-passport, agent-stack-go, 2026-09-12) came with the surface
+    written down and a gate that fails when it moves; trailryx, idryx, qryx and
+    wardryx carry the same pair. This repository's manifest was written on
+    2026-09-13, ahead of its own 1.0, so the tag freezes something already
+    held.
+
+    Frozen, in nine kinds: the three MCP methods the server answers
+    (`initialize`, `tools/list`, `tools/call`), the one tool (`browse`), its
+    three arguments and the three `extract` values, the `X-Scopyx-Key` header,
+    the seventeen `SCOPYX_*` names `cmd/scopyx/main.go` reads, the three
+    backend and three robots values, and the two event types emitted under
+    `source: scopyx` (`web_fetch`, `web_blocked`). Additive: new tools and
+    optional arguments, new event types, new `SCOPYX_*` names whose default
+    keeps today's behaviour, the two image variants staying with a third
+    allowed. Experimental: the chromium backend's CDP details and the external
+    backend's request shape.
+
+    The check is textual by design and says so: a plain name must appear as a
+    quoted literal (or as the leading field of a Go struct tag) in a file the
+    manifest says holds it, so a comment mentioning it does not count as the
+    code carrying it. estate-gates C19 asks whether the manifest and the gate
+    exist and whether the newest tag is 1.0 or above; this gate asks whether
+    the promise still holds.
+    *(gate: `scripts/compat-surface.sh`; six cases in `gates-have-teeth.sh`: an
+    MCP method gone from the server, an env name gone from `main`, an emitted
+    event type renamed, `COMPATIBILITY.md` edited by hand, an additive name
+    added (must pass), the manifest gone (measured nothing).)*
 
 ## Decisions that have no gate yet
 
