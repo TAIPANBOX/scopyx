@@ -66,3 +66,33 @@ Feature: A screenshot request gets a screenshot, and wait_for is waited for
     Given a fetch with extract set to text, html, screenshot, or left empty
     When the fidelity block is assembled
     Then its extract field is that value, or html when the request left it empty
+
+  # A Fable review (2026-09-16, PR #47) found four more places the same rule
+  # this feature holds, "a result carries what actually happened", was not
+  # yet held. These four scenarios hold the fixes, red first.
+
+  # @test:TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt
+  Scenario: An invalid CSS selector in wait_for is refused, not polled to a timeout
+    Given a page every decision allows
+    When wait_for is set to a string that is not valid CSS, such as "##not-a-selector"
+    Then the fetch is refused with an error naming the invalid selector
+    And it fails on the first evaluate rather than burning the whole wait_for bound
+
+  # @test:TestAScreenshotAnswerComesBackAsImageContentNotText
+  Scenario: The MCP server wraps a screenshot answer as image content, not text
+    Given a fetcher that answers a screenshot request with PNG bytes
+    When the MCP server assembles the tool result
+    Then the content item's type is image, its mimeType is image/png, and its data is the bytes verbatim
+
+  # @test:TestATextOrHTMLAnswerStaysTextContent
+  Scenario: A text or html answer keeps the existing text content shape
+    Given a fetcher that answers a text or html request
+    When the MCP server assembles the tool result
+    Then the content item's type is text and its text is the body verbatim
+
+  # @test:TestARefusedScreenshotStillJournalsTheEgressThatHappened
+  Scenario: An over-bound screenshot still journals the egress that already happened
+    Given a page rendered by the chromium backend with a byte bound too small for its screenshot
+    When extract=screenshot is requested and the screenshot is refused for its size
+    Then the journal still holds a web_fetch record naming what was actually fetched
+    And the refusal is still returned to the caller

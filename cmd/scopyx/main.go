@@ -332,6 +332,19 @@ func (g *governed) Fetch(ctx context.Context, c mcp.Call) (mcp.Answer, error) {
 			// Logged without the URL. Invariant 10: a URL is personal data and
 			// nothing above debug logs a full one.
 			g.log.Info("refused", "verdict", r.Verdict().String(), "agent", c.AgentID)
+		} else if res.FinalURL != "" {
+			// Not a *fetch.Refusal: the backend fetched something and THEN
+			// refused, the over-bound screenshot being the case that found
+			// this hole (finding 3, 2026-09-16). The page and its allowed
+			// subresources already left through the pinned dialer and the
+			// proxy floor; a *fetch.Refusal never reaches the backend at
+			// all, so this branch and that one are never both true for the
+			// same call. FinalURL empty means the backend fetched nothing
+			// before erroring (an ordinary connection failure, or
+			// passthrough's screenshot refusal before any request is made),
+			// and nothing is journalled for that, same as before this fix.
+			g.journal.Fetch(c.AgentID, c.RunID, res.FinalURL,
+				res.Fidelity.Backend, string(res.Fidelity.Enforcement), res.Fidelity.ContentBytes)
 		}
 		return mcp.Answer{}, err
 	}

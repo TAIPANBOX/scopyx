@@ -20,6 +20,10 @@ import (
 type recordingFetcher struct {
 	last Call
 	err  error
+
+	// body overrides the default "the page" when set, so a test can hand
+	// back bytes that stand in for a screenshot.
+	body []byte
 }
 
 func (f *recordingFetcher) Fetch(_ context.Context, c Call) (Answer, error) {
@@ -27,10 +31,14 @@ func (f *recordingFetcher) Fetch(_ context.Context, c Call) (Answer, error) {
 	if f.err != nil {
 		return Answer{}, f.err
 	}
+	body := f.body
+	if body == nil {
+		body = []byte("the page")
+	}
 	return Answer{
-		Body:     []byte("the page"),
+		Body:     body,
 		FinalURL: c.URL,
-		Fidelity: decide.Fidelity{Backend: "fixture", Enforcement: decide.EnforcementPerRequest},
+		Fidelity: decide.Fidelity{Backend: "fixture", Enforcement: decide.EnforcementPerRequest, Extract: c.Extract},
 	}, nil
 }
 
@@ -246,6 +254,71 @@ func TestAValueOutsideADeclaredEnumIsRefused(t *testing.T) {
 	}
 	if f.last.URL != "" {
 		t.Error("the fetcher was reached with an unvalidated value")
+	}
+}
+
+// Finding 2 (Fable, 2026-09-16). Until this fix, a screenshot answer left the
+// server as {"type":"text","text":"<base64>"}, so an MCP client handed the
+// model a base64 blob to read as text rather than the picture the feature
+// exists to deliver. MCP's own content kinds carry {"type":"image",
+// "data":...,"mimeType":...} for exactly this case. Additive: neither content
+// kind, "text" nor "image", is among compat/1.0.json's nine frozen names, so
+// choosing between them per answer changes nothing the manifest promises.
+func TestAScreenshotAnswerComesBackAsImageContentNotText(t *testing.T) {
+	f := &recordingFetcher{body: []byte("fake-png-bytes")}
+	srv := serve(t, "k1=agent://acme.example/bot", f)
+
+	_, out := rpc(t, srv, "k1",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse",
+		 "arguments":{"url":"https://example.com/","extract":"screenshot"}}}`)
+
+	res, ok := out["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result: %v", out)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("no content: %v", res)
+	}
+	first, _ := content[0].(map[string]any)
+	if first["type"] != "image" {
+		t.Fatalf("content[0].type = %v, want %q", first["type"], "image")
+	}
+	if first["mimeType"] != "image/png" {
+		t.Errorf("mimeType = %v, want image/png", first["mimeType"])
+	}
+	if first["data"] != "fake-png-bytes" {
+		t.Errorf("data = %v, want the body verbatim", first["data"])
+	}
+	if _, hasText := first["text"]; hasText {
+		t.Error("an image content item must not also carry a text field: a client would read it as the answer")
+	}
+}
+
+// A non-screenshot answer is unaffected: still {"type":"text",...}, exactly
+// compat/1.0.json's promise for extract in (text, html).
+func TestATextOrHTMLAnswerStaysTextContent(t *testing.T) {
+	f := &recordingFetcher{body: []byte("<html>hi</html>")}
+	srv := serve(t, "k1=agent://acme.example/bot", f)
+
+	_, out := rpc(t, srv, "k1",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browse",
+		 "arguments":{"url":"https://example.com/","extract":"html"}}}`)
+
+	res, ok := out["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result: %v", out)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("no content: %v", res)
+	}
+	first, _ := content[0].(map[string]any)
+	if first["type"] != "text" {
+		t.Fatalf("content[0].type = %v, want %q", first["type"], "text")
+	}
+	if first["text"] != "<html>hi</html>" {
+		t.Errorf("text = %v, want the body verbatim", first["text"])
 	}
 }
 

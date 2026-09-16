@@ -406,7 +406,11 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 
 	trunc := decide.Truncation("")
 	if req.WaitFor != "" {
-		trunc = c.waitFor(ctx, conn, sid, req.WaitFor)
+		t, err := c.waitFor(ctx, conn, sid, req.WaitFor)
+		if err != nil {
+			return Result{}, err
+		}
+		trunc = t
 	}
 
 	finalURL := evalString(ctx, conn, sid, "location.href")
@@ -434,7 +438,17 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 	body := []byte(eval.Result.Value)
 	if int64(len(body)) > c.MaxBodyBytes {
 		body = body[:c.MaxBodyBytes]
-		trunc = decide.TruncatedByBytes
+		// The body is cut to fit regardless, but the RECORDED reason is not
+		// overwritten when wait_for already spent the bound: `time` is kept
+		// rather than silently replaced by `bytes`, because a caller who
+		// asked to wait for something already knows the page was still
+		// forming, and losing that fact to a second, unrelated bound is the
+		// same over-claim invariant 5 exists to refuse, just moved to a
+		// different field. See CLAUDE.md invariant 5: time wins when both
+		// bounds are hit in the same fetch.
+		if trunc == decide.TruncatedNone {
+			trunc = decide.TruncatedByBytes
+		}
 	}
 
 	// Taken again rather than reused: the evals above are round trips to the
@@ -472,16 +486,25 @@ const waitForPoll = 100 * time.Millisecond
 
 // waitFor polls document.querySelector(selector) until it is non-null or its
 // own bound elapses, and returns the truncation to report: none if the
-// selector appeared, time if the bound ran out first.
+// selector appeared, time if the bound ran out first. An error means the
+// selector itself is not valid CSS, named in the error text, and the caller
+// must not be told the fetch merely ran long.
 //
-// It never returns an error for a selector that merely did not appear: a
-// caller who asked to wait for something that never shows up still gets the
-// document, which is invariant 5's shape applied to this one argument. The
-// selector is caller input and goes into the evaluated expression as a JSON
-// string literal, never by concatenation, so a selector holding a quote and a
-// closing parenthesis cannot break out of the querySelector(...) call it sits
-// inside; see TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
-func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector string) decide.Truncation {
+// It never returns an error for a selector that is valid CSS and merely did
+// not appear: a caller who asked to wait for something that never shows up
+// still gets the document, which is invariant 5's shape applied to this one
+// argument. The selector is caller input and goes into the evaluated
+// expression as a JSON string literal, never by concatenation, so a selector
+// holding a quote and a closing parenthesis cannot break out of the
+// querySelector(...) call it sits inside; see
+// TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
+//
+// Every Runtime.evaluate call in this function runs on waitCtx, not ctx: the
+// fetch's own context stays alive until the whole fetch's timeout, which
+// would let one evaluate blocked by a busy page main thread eat waitForReserve
+// and fail the extraction that follows rather than failing here, inside the
+// bound that exists to hold that cost.
+func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector string) (decide.Truncation, error) {
 	bound := waitForMinimum
 	if dl, ok := ctx.Deadline(); ok {
 		if remaining := time.Until(dl) - waitForReserve; remaining > bound {
@@ -496,29 +519,76 @@ func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector st
 		// Every Go string marshals to JSON; this is unreachable in practice
 		// and guarded rather than ignored because a silent skip here would be
 		// a wait_for that was accepted and quietly never waited on.
-		return decide.TruncatedByTime
+		return decide.TruncatedByTime, nil
 	}
 	expr := "document.querySelector(" + string(selJSON) + ") !== null"
+
+	// The FIRST evaluate is read for exceptionDetails specifically. An
+	// invalid selector, "##not-a-selector" say, throws inside
+	// document.querySelector, and CDP answers that as exceptionDetails on an
+	// otherwise-successful Runtime.evaluate call: conn.Call's own error stays
+	// nil and found.Result.Value stays false, on every single poll, forever,
+	// which is indistinguishable from a selector that is merely absent.
+	// Unchecked, the loop below polls for the WHOLE bound and reports
+	// truncated_by: time, reporting the page as slow when the selector was
+	// invalid from the first call. A selector's validity cannot change
+	// between polls of the same document, so checking once here is enough;
+	// later polls only need the match itself.
+	// Measured against the unfixed backend, 2026-09-16: WaitFor
+	// "##not-a-selector" at a 6s timeout burned 4.1s, err nil, TruncatedBy
+	// "time".
+	matched, exception := c.evalWaitFor(waitCtx, conn, sid, expr)
+	if exception != "" {
+		return decide.TruncatedByTime, fmt.Errorf(
+			"scopyx: wait_for %q is not a valid CSS selector: %s", selector, exception)
+	}
+	if matched {
+		return decide.TruncatedNone, nil
+	}
 
 	ticker := time.NewTicker(waitForPoll)
 	defer ticker.Stop()
 	for {
-		var found struct {
-			Result struct {
-				Value bool `json:"value"`
-			} `json:"result"`
-		}
-		if err := conn.Call(ctx, sid, "Runtime.evaluate",
-			map[string]any{"expression": expr, "returnByValue": true}, &found); err == nil && found.Result.Value {
-			return decide.TruncatedNone
-		}
 		select {
 		case <-ticker.C:
-			continue
+			if matched, _ := c.evalWaitFor(waitCtx, conn, sid, expr); matched {
+				return decide.TruncatedNone, nil
+			}
 		case <-waitCtx.Done():
-			return decide.TruncatedByTime
+			return decide.TruncatedByTime, nil
 		}
 	}
+}
+
+// evalWaitFor runs the wait_for expression once and reports whether it
+// matched. exception carries the browser's own exception text when the
+// selector itself is invalid CSS; conn.Call's own error is a transport or CDP
+// failure, not a JS exception, and is treated here as "no match yet" rather
+// than as the selector's fault, because a selector's validity is what
+// exceptionDetails answers, never a dropped call.
+func (c *Chromium) evalWaitFor(ctx context.Context, conn *cdp.Conn, sid, expr string) (matched bool, exception string) {
+	var found struct {
+		Result struct {
+			Value bool `json:"value"`
+		} `json:"result"`
+		ExceptionDetails *struct {
+			Text      string `json:"text"`
+			Exception struct {
+				Description string `json:"description"`
+			} `json:"exception"`
+		} `json:"exceptionDetails"`
+	}
+	if err := conn.Call(ctx, sid, "Runtime.evaluate",
+		map[string]any{"expression": expr, "returnByValue": true}, &found); err != nil {
+		return false, ""
+	}
+	if found.ExceptionDetails != nil {
+		if found.ExceptionDetails.Exception.Description != "" {
+			return false, found.ExceptionDetails.Exception.Description
+		}
+		return false, found.ExceptionDetails.Text
+	}
+	return found.Result.Value, ""
 }
 
 // captureScreenshot renders the page as a PNG and returns it base64-encoded,
@@ -542,10 +612,18 @@ func (c *Chromium) captureScreenshot(ctx context.Context, conn *cdp.Conn, sid, f
 	}
 	body := []byte(shot.Data)
 	if int64(len(body)) > c.MaxBodyBytes {
-		return Result{}, fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG, over the "+
-			"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
-			"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
-			"text or html instead", len(body), c.MaxBodyBytes)
+		_, counted := snapshot()
+		// FinalURL and Subresources travel WITH the error rather than being
+		// dropped as Result{}: the page and its allowed subresources already
+		// left through the proxy before the capture came back oversized, and
+		// a caller with the journal (cmd/scopyx's governed.Fetch) needs that
+		// to record the egress that happened rather than a trail with
+		// nothing on it. See finding 3, 2026-09-16.
+		return Result{FinalURL: finalURL, Subresources: mergeCounts(counted, px), TruncatedBy: trunc},
+			fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG (as base64), over the "+
+				"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
+				"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
+				"text or html instead", len(body), c.MaxBodyBytes)
 	}
 
 	_, counted := snapshot()

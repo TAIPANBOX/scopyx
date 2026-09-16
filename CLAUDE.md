@@ -181,24 +181,84 @@ an absent invariant.
    `browse` tool accepted and the chromium backend answered neither, so a
    screenshot request came back as the page's HTML with the fidelity block
    silent about it. Fixed the same way as the rest of this invariant: a
-   screenshot is returned as base64 PNG, refused rather than truncated when
-   it does not fit `MaxBodyBytes`, because a PNG cut at an arbitrary byte
+   screenshot is returned **as base64** PNG, refused rather than truncated
+   when it does not fit `MaxBodyBytes` as base64 (the bound is on the base64
+   string, before decoding, so it admits a somewhat larger real PNG than its
+   number states, and `content_bytes` reports the base64 length; consistent
+   with what is actually returned), because a PNG cut at an arbitrary byte
    offset cannot be decoded; `wait_for` polls for its selector and, when it
    never appears, still returns the document with `truncated_by: time`
    rather than hanging or erroring; and the fidelity block now names which
    extract kind was requested, so a reader has a field to check the answer
    against the ask.
+
+   A Fable review (2026-09-16, PR #47) found four more places this same rule
+   was not yet held, fixed the same day:
+
+   - An invalid CSS selector in `wait_for` (`"##not-a-selector"`) throws
+     inside `document.querySelector`, and CDP's `Runtime.evaluate` answers
+     that as `exceptionDetails` on an otherwise-successful call, so the poll
+     loop could not tell "invalid" from "not yet" and reported the whole
+     bound spent as `truncated_by: time`, an over-claim of the same shape in
+     a new coat: the page was not slow, the selector was wrong from the
+     first evaluate. The first evaluate's `exceptionDetails` is read now, and
+     an invalid selector is refused with an error naming it, before the poll
+     loop ever starts.
+   - The over-bound screenshot was refused AFTER the page and every allowed
+     subresource had already gone out through the proxy, and it was a plain
+     error rather than a typed refusal, so `governed.Fetch` (`cmd/scopyx`)
+     journalled nothing: the egress had happened and the trail held no
+     record of it. The backend now returns what it knows (`FinalURL`, the
+     subresource counts) alongside the error, and `governed.Fetch` journals
+     a `web_fetch` event for it before returning the refusal to the caller,
+     so egress that happened is on the trail even when the answer it
+     produced is refused. A backend error with nothing fetched (an ordinary
+     connection failure, or passthrough's screenshot refusal before any
+     request is made) still journals nothing, exactly as before.
+   - A screenshot answer left `internal/mcp/server.go` as
+     `{"type":"text","text":"<base64>"}`; an MCP client hands text content to
+     the model as text, so the model read a base64 blob rather than the
+     picture the feature exists to deliver. `extract=screenshot` now emits
+     `{"type":"image","data":...,"mimeType":"image/png"}`, MCP's own content
+     kind for a picture; every other extract keeps `{"type":"text",...}`.
+     Additive: `compat/1.0.json` freezes `mcp.extract_values`, not the MCP
+     content kind an answer travels in, and neither `"text"` nor `"image"` is
+     among its nine frozen names.
+   - `wait_for`'s poll used the fetch's own context rather than its own
+     bounded one, so an evaluate blocked by a busy page main thread could eat
+     `waitForReserve` and fail the extraction that follows instead of failing
+     inside the bound that exists to hold that cost. Every evaluate in
+     `waitFor` now runs on `waitCtx`.
+   - When a `wait_for` time truncation and the body's own byte bound are both
+     hit in the same fetch, `time` is kept rather than silently overwritten
+     by `bytes`: a caller who asked to wait for something already knows the
+     page was still forming when the bound ran out, and losing that fact to
+     a second, unrelated bound would be this same invariant broken on a
+     different field. The body is still cut to fit either way; only the
+     recorded reason is protected.
    *(test: `internal/backend/browse_extract_test.go` against a real browser,
-   `TestScreenshotReturnsAPNGBody`,
+   `TestScreenshotReturnsAPNGBody` (decodes the PNG with the standard library
+   and checks one pixel, not only the magic bytes),
    `TestScreenshotOverTheByteBoundIsRefusedRatherThanTruncated`,
    `TestWaitForReturnsTheElementInsertedAfterLoad`,
    `TestWaitForOnASelectorThatNeverAppearsReturnsWithinTheBoundWithTimeTruncation`,
-   `TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection`, the last verified
-   by a canary server the injected script would reach if the selector broke
-   out of its string; `TestPassthroughRefusesScreenshotRatherThanReturningHTML`
-   in `internal/backend/passthrough_test.go`; and
+   `TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection` (two payloads, one
+   breaking a double-quote concatenation and one a single-quote one, each a
+   VALID never-matching CSS selector so the assertion is about injection and
+   not about the invalid-selector error below), and
+   `TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt`, run red first
+   against the unfixed backend: `WaitFor "##not-a-selector"` at a 6s timeout
+   burned 4.1s, `err` nil, `TruncatedBy` `"time"`;
+   `TestPassthroughRefusesScreenshotRatherThanReturningHTML` in
+   `internal/backend/passthrough_test.go`;
    `TestFidelityNamesTheExtractThatWasRequestedDefaultedToHTML` in
-   `internal/fetch/fetch_test.go`. Scenarios in `features/browse-extract.feature`.)*
+   `internal/fetch/fetch_test.go`;
+   `TestAScreenshotAnswerComesBackAsImageContentNotText` and
+   `TestATextOrHTMLAnswerStaysTextContent` in `internal/mcp/server_test.go`;
+   and `TestARefusedScreenshotStillJournalsTheEgressThatHappened` in
+   `cmd/scopyx`, against a real browser and a real journal, run red first:
+   the unfixed code left the journal empty after a page render the byte
+   bound then refused. Scenarios in `features/browse-extract.feature`.)*
 
 6. **Identity comes from an authenticated caller and never from a claim.**
    `AGENT_PASSPORT_ID` may fill a log line, an event's `agent_id` or a display

@@ -165,7 +165,21 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 
 		res, err := d.Backend.Fetch(ctx, current)
 		if err != nil {
-			return Result{}, err
+			// A backend can refuse AFTER it already fetched something: an
+			// over-bound screenshot is captured, then refused for its size,
+			// with the page and its allowed subresources already out through
+			// the pinned dialer and the proxy floor. That egress is real and
+			// the trail must be able to say so, so whatever the backend could
+			// report about it travels with the error rather than being
+			// discarded as Result{}.
+			//
+			// FinalURL is deliberately NOT defaulted to current.URL here, the
+			// way the success path below defaults it: a backend that fetched
+			// nothing before erroring (passthrough's screenshot refusal, or
+			// any ordinary connection failure) reports Result{}, and an empty
+			// FinalURL is how the caller tells "nothing left" from "something
+			// did" without inventing a URL for a fetch that never happened.
+			return Result{FinalURL: res.FinalURL, Fidelity: fidelityFor(d.Backend, res, current.Extract)}, err
 		}
 
 		if res.RedirectTo == "" {

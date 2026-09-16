@@ -1,8 +1,11 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,6 +63,22 @@ func TestScreenshotReturnsAPNGBody(t *testing.T) {
 			shown = shown[:16]
 		}
 		t.Errorf("the decoded body does not start with the PNG magic bytes, got %x", shown)
+	}
+
+	// Decoded with the standard library rather than left at the magic-byte
+	// check above, and one pixel is read back, because the magic bytes alone
+	// are the uncaught mutant this test held until 2026-09-16: a
+	// captureScreenshot that always answered with a fixed, valid, empty PNG
+	// (an about:blank capture, say) would pass every assertion above while
+	// never having rendered this page at all.
+	img, err := png.Decode(bytes.NewReader(decoded))
+	if err != nil {
+		t.Fatalf("the PNG magic bytes were present but the file does not decode: %v", err)
+	}
+	got := color.NRGBAModel.Convert(img.At(10, 10)).(color.NRGBA)
+	want := color.NRGBA{R: 0xff, G: 0x00, B: 0xff, A: 0xff}
+	if got != want {
+		t.Errorf("pixel (10,10) = %+v, want %+v (the magenta block the page renders there)", got, want)
 	}
 }
 
@@ -132,7 +151,7 @@ func TestWaitForReturnsTheElementInsertedAfterLoad(t *testing.T) {
 		t.Errorf("TruncatedBy = %q, want none: the selector appeared well inside the bound", res.TruncatedBy)
 	}
 	if elapsed > 10*time.Second {
-		t.Errorf("took %s to see an element inserted after 300ms; wait_for is not polling", elapsed)
+		t.Errorf("took %s to see an element inserted after 2000ms; wait_for is not polling", elapsed)
 	}
 }
 
@@ -177,6 +196,17 @@ func TestWaitForOnASelectorThatNeverAppearsReturnsWithinTheBoundWithTimeTruncati
 // ran, exactly the same shape as the subresource tests: an outcome check would
 // pass equally well if the injected code ran and merely returned something
 // harmless-looking.
+//
+// Both payloads below are, deliberately, VALID CSS attribute selectors that
+// never match anything on the page: an invalid selector now (Fable finding 1,
+// 2026-09-16) comes back as an error naming it rather than a time truncation,
+// which is a different property than the one this test holds, and is held
+// separately by TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt. Two
+// payloads, not one, because they break DIFFERENT naive ways of building the
+// evaluated expression: the first breaks a plain double-quote concatenation
+// (`"` + selector + `"`), which the actual code never does; the second breaks
+// a plain single-quote one (`'` + selector + `'`), a mutant the first payload
+// alone does not catch, because it carries no single quote at all.
 func TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection(t *testing.T) {
 	c := newChromium(t)
 	c.Timeout = 6 * time.Second
@@ -198,19 +228,63 @@ func TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection(t *testing.T) {
 	f.add("canary.example", canary, 2)
 	f.apply(c)
 
-	payload := `nope") ; fetch('http://canary.example/hit') ; //`
-	res, err := c.Fetch(context.Background(),
-		Request{URL: "http://inject.example/", Extract: "html", WaitFor: payload})
-	if err != nil {
-		t.Fatalf("an injection attempt in wait_for must not error the fetch: %v", err)
+	payloads := map[string]string{
+		"double quote and paren": `#x[data-a="b) ; fetch('http://canary.example/hit') ; //"]`,
+		"single quote":           `#y[data-b="it's ; fetch('http://canary.example/hit') ; //"]`,
 	}
-	if canaryHits.Load() != 0 {
-		t.Fatal("the canary was reached: the wait_for selector broke out of its string and ran as script")
+	for name, payload := range payloads {
+		t.Run(name, func(t *testing.T) {
+			res, err := c.Fetch(context.Background(),
+				Request{URL: "http://inject.example/", Extract: "html", WaitFor: payload})
+			if err != nil {
+				t.Fatalf("a never-matching selector must not error the fetch: %v", err)
+			}
+			if canaryHits.Load() != 0 {
+				t.Fatal("the canary was reached: the wait_for selector broke out of its string and ran as script")
+			}
+			if res.TruncatedBy != decide.TruncatedByTime {
+				t.Errorf("TruncatedBy = %q, want %q: the literal selector never matches anything", res.TruncatedBy, decide.TruncatedByTime)
+			}
+			if !strings.Contains(string(res.Body), "ordinary page") {
+				t.Errorf("the document must still come back untouched: %.200q", res.Body)
+			}
+		})
 	}
-	if res.TruncatedBy != decide.TruncatedByTime {
-		t.Errorf("TruncatedBy = %q, want %q: the literal selector never matches anything", res.TruncatedBy, decide.TruncatedByTime)
+}
+
+// wait_for on a selector that is not valid CSS at all. document.querySelector
+// throws inside the page, and CDP's Runtime.evaluate answers that as
+// exceptionDetails on an otherwise successful call: found.Result.Value is
+// simply false, forever, indistinguishable from a selector that merely never
+// matches. Before the fix (Fable finding 1, 2026-09-16) this polled for the
+// WHOLE bound and reported truncated_by: time, the page's own timing standing
+// in for a typo. Measured against the unfixed backend, 2026-09-16: a 6s
+// timeout, WaitFor "##not-a-selector", burned 4.1s, err nil, TruncatedBy
+// "time".
+func TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt(t *testing.T) {
+	c := newChromium(t)
+	c.Timeout = 6 * time.Second
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body><h1>ordinary page</h1></body></html>`))
+	}))
+	defer srv.Close()
+	f := newFixture()
+	f.add("badselector.example", srv, 1)
+	f.apply(c)
+
+	start := time.Now()
+	_, err := c.Fetch(context.Background(),
+		Request{URL: "http://badselector.example/", Extract: "html", WaitFor: "##not-a-selector"})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("an invalid CSS selector must be refused with an error, not polled for the whole bound")
 	}
-	if !strings.Contains(string(res.Body), "ordinary page") {
-		t.Errorf("the document must still come back untouched: %.200q", res.Body)
+	if !strings.Contains(err.Error(), "##not-a-selector") {
+		t.Errorf("the error must name the invalid selector, got %q", err)
+	}
+	if elapsed >= c.Timeout {
+		t.Errorf("took %s, most of the timeout: an invalid selector must fail on the first evaluate, not poll for it", elapsed)
 	}
 }
