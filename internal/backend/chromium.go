@@ -372,6 +372,28 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		return Result{}, err
 	}
 
+	// wait_for's selector is checked HERE, on the target's still-blank
+	// document, before Page.navigate: a Fable review round 2 (2026-09-16)
+	// found that checking it after navigation (the first cut of this fix,
+	// finding 1) meant an invalid selector was still refused only once the
+	// page and every allowed subresource had already left through the
+	// proxy, as a plain error carrying Result{}: FinalURL empty, which
+	// governed.Fetch (cmd/scopyx) reads as "the backend fetched nothing".
+	// That was finding 3's hole reopened on the path finding 1 created.
+	//
+	// document.querySelector's syntax check does not depend on the document
+	// it runs against, so checking it here answers the same question with
+	// zero egress instead of an egress record: nothing is fetched for a
+	// typo, so Result{} here is honest rather than a gap. waitFor's own
+	// first-evaluate check (below) stays as defence in depth; it cannot
+	// fire for a selector that already passed here, because validity does
+	// not change between the two documents.
+	if req.WaitFor != "" {
+		if err := c.validateWaitForSelector(ctx, conn, sid, req.WaitFor); err != nil {
+			return Result{}, err
+		}
+	}
+
 	var nav struct {
 		ErrorText string `json:"errorText"`
 	}
@@ -484,20 +506,60 @@ const waitForMinimum = 300 * time.Millisecond
 // waitForPoll is how often the selector is re-checked.
 const waitForPoll = 100 * time.Millisecond
 
+// waitForExpr builds the document.querySelector expression wait_for
+// evaluates, with the selector carried as a JSON string literal rather than
+// by concatenation, so a selector holding a quote and a closing parenthesis
+// cannot break out of the querySelector(...) call it sits inside; see
+// TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
+func waitForExpr(selector string) (string, error) {
+	selJSON, err := json.Marshal(selector)
+	if err != nil {
+		return "", err
+	}
+	return "document.querySelector(" + string(selJSON) + ") !== null", nil
+}
+
+// validateWaitForSelector checks wait_for's selector for CSS validity on the
+// target's still-blank document, BEFORE Page.navigate ever runs.
+//
+// document.querySelector's syntax check does not depend on the document it
+// runs against, so checking it here, before navigation, answers the same
+// question waitFor's own first evaluate answers after navigation, but with
+// zero egress for an invalid selector rather than an egress record: no
+// Page.navigate, no subresources, nothing through the proxy. A Fable review
+// round 2 (2026-09-16) found that checking only after navigation (the first
+// cut of this fix, finding 1) let a typo still fetch the document before
+// being refused, and the refusal's Result{} then read, wrongly, as "the
+// backend fetched nothing" (finding 3's hole, reopened on the path finding 1
+// created). Run red first against that code: the document server was hit
+// once before the error came back.
+func (c *Chromium) validateWaitForSelector(ctx context.Context, conn *cdp.Conn, sid, selector string) error {
+	expr, err := waitForExpr(selector)
+	if err != nil {
+		// Every Go string marshals to JSON; this is unreachable in practice
+		// and guarded rather than ignored because a silent skip here would be
+		// a wait_for that was accepted and quietly never validated.
+		return nil
+	}
+	if _, exception := c.evalWaitFor(ctx, conn, sid, expr); exception != "" {
+		return fmt.Errorf("scopyx: wait_for %q is not a valid CSS selector: %s", selector, exception)
+	}
+	return nil
+}
+
 // waitFor polls document.querySelector(selector) until it is non-null or its
 // own bound elapses, and returns the truncation to report: none if the
 // selector appeared, time if the bound ran out first. An error means the
 // selector itself is not valid CSS, named in the error text, and the caller
-// must not be told the fetch merely ran long.
+// must not be told the fetch merely ran long. In practice this cannot fire
+// for a selector that already passed validateWaitForSelector above, since
+// validity does not change between the target's blank document and the
+// navigated one; kept as defence in depth rather than removed.
 //
 // It never returns an error for a selector that is valid CSS and merely did
 // not appear: a caller who asked to wait for something that never shows up
 // still gets the document, which is invariant 5's shape applied to this one
-// argument. The selector is caller input and goes into the evaluated
-// expression as a JSON string literal, never by concatenation, so a selector
-// holding a quote and a closing parenthesis cannot break out of the
-// querySelector(...) call it sits inside; see
-// TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
+// argument.
 //
 // Every Runtime.evaluate call in this function runs on waitCtx, not ctx: the
 // fetch's own context stays alive until the whole fetch's timeout, which
@@ -514,14 +576,13 @@ func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector st
 	waitCtx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 
-	selJSON, err := json.Marshal(selector)
+	expr, err := waitForExpr(selector)
 	if err != nil {
 		// Every Go string marshals to JSON; this is unreachable in practice
 		// and guarded rather than ignored because a silent skip here would be
 		// a wait_for that was accepted and quietly never waited on.
 		return decide.TruncatedByTime, nil
 	}
-	expr := "document.querySelector(" + string(selJSON) + ") !== null"
 
 	// The FIRST evaluate is read for exceptionDetails specifically. An
 	// invalid selector, "##not-a-selector" say, throws inside
@@ -618,12 +679,20 @@ func (c *Chromium) captureScreenshot(ctx context.Context, conn *cdp.Conn, sid, f
 		// left through the proxy before the capture came back oversized, and
 		// a caller with the journal (cmd/scopyx's governed.Fetch) needs that
 		// to record the egress that happened rather than a trail with
-		// nothing on it. See finding 3, 2026-09-16.
-		return Result{FinalURL: finalURL, Subresources: mergeCounts(counted, px), TruncatedBy: trunc},
-			fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG (as base64), over the "+
-				"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
-				"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
-				"text or html instead", len(body), c.MaxBodyBytes)
+		// nothing on it. See finding 3, 2026-09-16. ContentBytes carries the
+		// base64 length too, a Fable review round 2 nit (2026-09-16): Body
+		// stays empty because the bytes are refused, not truncated, and
+		// without this the record's content_bytes read 0, understating what
+		// was actually captured.
+		return Result{
+			FinalURL:     finalURL,
+			Subresources: mergeCounts(counted, px),
+			TruncatedBy:  trunc,
+			ContentBytes: int64(len(body)),
+		}, fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG (as base64), over the "+
+			"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
+			"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
+			"text or html instead", len(body), c.MaxBodyBytes)
 	}
 
 	_, counted := snapshot()

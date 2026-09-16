@@ -96,3 +96,21 @@ Feature: A screenshot request gets a screenshot, and wait_for is waited for
     When extract=screenshot is requested and the screenshot is refused for its size
     Then the journal still holds a web_fetch record naming what was actually fetched
     And the refusal is still returned to the caller
+
+  # A round 2 Fable review (2026-09-16, same day) found the fix above for the
+  # invalid-selector scenario still checked the selector AFTER Page.navigate,
+  # so a typo still cost a real fetch: finding 3's hole, reopened on the path
+  # the first fix created. These two scenarios hold the second fix, red first.
+
+  # @test:TestAnInvalidWaitForSelectorNeverNavigatesAtAll
+  Scenario: An invalid wait_for selector is caught before the page is ever fetched
+    Given a page every decision allows
+    When wait_for is set to a string that is not valid CSS, such as "##not-a-selector"
+    Then the fetch is refused with an error naming the invalid selector
+    And the document's server is never reached
+
+  # @test:TestAnInvalidWaitForSelectorFetchesNothingAndJournalsNothing
+  Scenario: An invalid wait_for selector fetches nothing and journals nothing
+    Given a page rendered by the chromium backend behind a real journal
+    When wait_for is set to a string that is not valid CSS
+    Then the document's server is never reached and the journal holds no record

@@ -110,4 +110,15 @@ func TestARefusedScreenshotStillJournalsTheEgressThatHappened(t *testing.T) {
 	if evs[0].AgentID != "agent://acme.example/support-bot" {
 		t.Errorf("agent_id = %q, want the identity the credential carries", evs[0].AgentID)
 	}
+	// A Fable review round 2 nit (2026-09-16): Body is intentionally empty
+	// on this path (the capture is refused, not returned), and content_bytes
+	// used to be derived from len(Body) alone, so the record read 0 and
+	// looked like an empty fetch rather than a refused, oversized one. The
+	// capture itself is bounded to well over ch.MaxBodyBytes (16) above, so
+	// content_bytes here must be well over 16 too.
+	cb, ok := evs[0].Data["content_bytes"].(float64)
+	if !ok || cb <= 16 {
+		t.Errorf("content_bytes = %v, want the actual base64 length captured (well over 16): "+
+			"a refused screenshot must not understate the bytes it saw as 0", evs[0].Data["content_bytes"])
+	}
 }

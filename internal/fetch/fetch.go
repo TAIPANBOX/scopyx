@@ -245,12 +245,19 @@ func fidelityFor(b backend.Backend, res backend.Result, extract string) decide.F
 	if extract == "" {
 		extract = "html"
 	}
+	contentBytes := int64(len(res.Body))
+	if res.ContentBytes > 0 {
+		// A backend that saw content but withheld it from Body, the refused
+		// over-bound screenshot being the case that needed this: len(Body)
+		// alone would report 0 and understate what was actually captured.
+		contentBytes = res.ContentBytes
+	}
 	f := decide.Fidelity{
 		Backend:      b.Name(),
 		Enforcement:  b.Enforcement(),
 		Extract:      extract,
 		HTTPStatus:   res.HTTPStatus,
-		ContentBytes: int64(len(res.Body)),
+		ContentBytes: contentBytes,
 		RedirectHops: len(res.Redirects),
 		TruncatedBy:  res.TruncatedBy,
 	}

@@ -204,6 +204,21 @@ an absent invariant.
      first evaluate. The first evaluate's `exceptionDetails` is read now, and
      an invalid selector is refused with an error naming it, before the poll
      loop ever starts.
+
+     A round 2 Fable review (2026-09-16, same day) found this first cut still
+     checked the selector AFTER `Page.navigate`, so a typo still cost a real
+     fetch: the document and every allowed subresource had already left
+     through the proxy by the time the selector was found invalid, as a
+     plain error carrying `Result{}`, which `governed.Fetch` (`cmd/scopyx`)
+     then read as "the backend fetched nothing", the exact hole the
+     screenshot bullet below closes, reopened on this new path. Fixed by
+     checking the selector on the target's still-blank `about:blank`
+     document, before `Page.navigate` ever runs: `document.querySelector`'s
+     syntax check does not depend on the document it runs against, so this
+     answers the same question with zero egress for a typo rather than an
+     egress record for one, and `Result{}` here is honest, not a gap.
+     `waitFor`'s own post-navigation check stays as defence in depth; it
+     cannot fire for a selector that already passed the pre-navigation one.
    - The over-bound screenshot was refused AFTER the page and every allowed
      subresource had already gone out through the proxy, and it was a plain
      error rather than a typed refusal, so `governed.Fetch` (`cmd/scopyx`)
@@ -236,6 +251,14 @@ an absent invariant.
      a second, unrelated bound would be this same invariant broken on a
      different field. The body is still cut to fit either way; only the
      recorded reason is protected.
+   - The refused-oversized screenshot's journal record carried
+     `content_bytes: 0`, a round 2 review nit: `Body` stays empty on that
+     path because the bytes are refused rather than truncated, and the
+     record derived `content_bytes` from `len(Body)` alone, so the trail
+     understated what was actually captured and read like an empty fetch
+     rather than a refused one. `backend.Result` gained a `ContentBytes`
+     field a backend sets when it saw content it is not returning in `Body`;
+     the record now prefers it over `len(Body)` when set.
    *(test: `internal/backend/browse_extract_test.go` against a real browser,
    `TestScreenshotReturnsAPNGBody` (decodes the PNG with the standard library
    and checks one pixel, not only the magic bytes),
@@ -249,16 +272,25 @@ an absent invariant.
    `TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt`, run red first
    against the unfixed backend: `WaitFor "##not-a-selector"` at a 6s timeout
    burned 4.1s, `err` nil, `TruncatedBy` `"time"`;
+   `TestAnInvalidWaitForSelectorNeverNavigatesAtAll`, run red first against
+   the round 1 fix (commit `f1801fc`, selector checked after navigation): the
+   document server was hit once before the error came back;
    `TestPassthroughRefusesScreenshotRatherThanReturningHTML` in
    `internal/backend/passthrough_test.go`;
    `TestFidelityNamesTheExtractThatWasRequestedDefaultedToHTML` in
    `internal/fetch/fetch_test.go`;
    `TestAScreenshotAnswerComesBackAsImageContentNotText` and
    `TestATextOrHTMLAnswerStaysTextContent` in `internal/mcp/server_test.go`;
-   and `TestARefusedScreenshotStillJournalsTheEgressThatHappened` in
+   `TestARefusedScreenshotStillJournalsTheEgressThatHappened` in
    `cmd/scopyx`, against a real browser and a real journal, run red first:
    the unfixed code left the journal empty after a page render the byte
-   bound then refused. Scenarios in `features/browse-extract.feature`.)*
+   bound then refused, and (round 2) its `content_bytes` assertion, run red
+   first against the round 1 fix: `content_bytes` came back `0`; and
+   `TestAnInvalidWaitForSelectorFetchesNothingAndJournalsNothing` in
+   `cmd/scopyx`, against a real browser and a real journal, run red first
+   against the round 1 fix: the document server was hit once and the answer
+   still carried no journal record. Scenarios in
+   `features/browse-extract.feature`.)*
 
 6. **Identity comes from an authenticated caller and never from a claim.**
    `AGENT_PASSPORT_ID` may fill a log line, an event's `agent_id` or a display

@@ -288,3 +288,46 @@ func TestWaitForOnAnInvalidSelectorReturnsAnErrorNamingIt(t *testing.T) {
 		t.Errorf("took %s, most of the timeout: an invalid selector must fail on the first evaluate, not poll for it", elapsed)
 	}
 }
+
+// Round 2 of the Fable review, 2026-09-16, found a hole the fix above opened:
+// the selector was validated AFTER Page.navigate, so an invalid selector was
+// refused only once the page and every allowed subresource had already gone
+// out through the proxy. That is finding 3's hole reopened on the path
+// finding 1 created, and it is why governed.Fetch in cmd/scopyx read
+// Result{} from this path as "the backend fetched nothing": it had, in fact,
+// fetched the document.
+//
+// This test holds the second fix: the selector is checked on the target's
+// about:blank document, before Page.navigate ever runs, so an invalid
+// selector costs zero egress rather than needing to be journalled after the
+// fact. Run red first against the round-1 code (commit f1801fc, selector
+// checked inside waitFor after navigation): the document server was hit once
+// before the error came back.
+func TestAnInvalidWaitForSelectorNeverNavigatesAtAll(t *testing.T) {
+	c := newChromium(t)
+	c.Timeout = 6 * time.Second
+
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body><h1>never fetched</h1></body></html>`))
+	}))
+	defer srv.Close()
+	f := newFixture()
+	f.add("neverfetched.example", srv, 1)
+	f.apply(c)
+
+	_, err := c.Fetch(context.Background(),
+		Request{URL: "http://neverfetched.example/", Extract: "html", WaitFor: "##not-a-selector"})
+	if err == nil {
+		t.Fatal("an invalid CSS selector must be refused")
+	}
+	if !strings.Contains(err.Error(), "##not-a-selector") {
+		t.Errorf("the error must name the invalid selector, got %q", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("document server hits = %d, want 0: an invalid selector must be caught before "+
+			"Page.navigate ever runs, not after the document already left through the proxy", hits.Load())
+	}
+}
