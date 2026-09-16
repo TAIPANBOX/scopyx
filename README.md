@@ -81,7 +81,7 @@ docker run --rm \
   -e SCOPYX_EVENTS=/var/lib/scopyx/events.ndjson \
   -v scopyx-events:/var/lib/scopyx \
   -p 4300:4300 \
-  ghcr.io/taipanbox/scopyx:v1.0.0
+  ghcr.io/taipanbox/scopyx:v1.0.1
 ```
 
 Then point an MCP client at `http://localhost:4300` with the header
@@ -236,10 +236,10 @@ were measured on 2026-08-10, and both render:
 
 ```bash
 # keep Chrome's sandbox, relax the container's syscall filter
-docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v1.0.0-chromium
+docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v1.0.1-chromium
 
 # keep the container's syscall filter, turn Chrome's sandbox off
-docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v1.0.0-chromium
+docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v1.0.1-chromium
 ```
 
 On Kubernetes the choice is often already made: a namespace at PodSecurity
