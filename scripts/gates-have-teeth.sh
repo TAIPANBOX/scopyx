@@ -222,6 +222,18 @@ run_case "no-compliance-claims: a README that claims compliance" fail \
 open("README.md","w").write(s + "\n\nscopyx is GDPR compliant and AI Act compliant.\n")')" \
 	"reads as a claim"
 
+# Invariant 15. A scenario pointing at a test that has been renamed reads as
+# held, and only this direction can see it.
+run_case "features-are-bound: a scenario names a test that is gone" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/subresources.feature", "@test:TestASubresourceHostThePolicyPlaneRefusesIsDenied", "@test:TestASubresourceHostThePolicyPlaneRefusesIsDeniedSomewhereElse")')" \
+	"no such test exists"
+
+run_case "features-are-bound: a scenario with no binding at all" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/subresources.feature", "  Scenario: One question per host, not one per request", "  Scenario: Something nobody bound\n    Given a paragraph\n\n  Scenario: One question per host, not one per request")')" \
+	"binding(s)"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -248,6 +260,12 @@ run_case "no-delegated-decisions: a comment that mentions decide.Decision" pass 
 	'./scripts/no-delegated-decisions.sh' \
 	"$(py 'edit("internal/backend/external.go", "package backend",
      "// A decide.Decision{ built here would be invariant 1 broken from inside.\npackage backend")')"
+
+# A test named in prose is not a binding. A gate that fires on a correct file
+# gets deleted by whoever is unblocking CI.
+run_case "features-are-bound: a test named in prose rather than in a binding" pass \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'edit("features/subresources.feature", "  # @test:TestASubresourceIsDecidedOncePerHostNotOncePerRequest", "  # See also TestSomethingThatDoesNotExistAtAll below.\n  # @test:TestASubresourceIsDecidedOncePerHostNotOncePerRequest")')"
 
 # And the honest negative form has to stay usable, or the rule cannot be
 # written down anywhere, including in the file that states it.
@@ -288,6 +306,15 @@ for f in sorted(pathlib.Path("internal/backend").glob("*.go")):
     subprocess.run(["git", "mv", str(f), str(f) + ".disabled"], check=True)
     n += 1
 assert n, "no backend files"')" \
+	"measured nothing"
+
+run_case "features-are-bound: no scenarios left to check" fail \
+	'./scripts/features-are-bound.sh' \
+	"$(py 'import subprocess
+out = subprocess.run(["git", "ls-files", "features"], capture_output=True, text=True).stdout.split()
+assert out, "no feature files tracked in this repo"
+for f in out:
+    subprocess.run(["git", "rm", "-q", f], check=True)')" \
 	"measured nothing"
 
 run_case "one-way-out: no Go files left to read" fail \

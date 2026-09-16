@@ -102,7 +102,7 @@ func TestOnlyHttpAndHttpsAreFetched(t *testing.T) {
 // the metadata endpoint.
 func TestALocalAddressIsRefusedEvenWhenPolicyAllowsIt(t *testing.T) {
 	d := Destination("https://friendly.example/x", addrs(t, "169.254.169.254"),
-		PolicyAnswer{Allowed: true, AllowDomains: []string{"friendly.example"}})
+		PolicyAnswer{Allowed: true})
 	if d.Verdict != DenyAddress {
 		t.Fatalf("got %v, want DenyAddress: a policy allow does not reach past the address rules", d.Verdict)
 	}
@@ -187,42 +187,41 @@ func TestARedirectChainPastItsBoundIsRefused(t *testing.T) {
 
 // ------------------------------------------------------------- subresources
 
-func TestASubresourceOutsideTheAllowSetIsRefused(t *testing.T) {
+func TestASubresourceThePolicyPlaneRefusesIsRefused(t *testing.T) {
 	d := Subresource("https://tracker.example/pixel.gif", addrs(t, "93.184.216.34"),
-		[]string{"example.com", ".cdn.example.com"})
+		PolicyAnswer{Allowed: false, Reason: "not a domain this agent may reach"})
 	if d.Verdict != DenyPolicy {
 		t.Fatalf("got %v, want DenyPolicy", d.Verdict)
 	}
-}
-
-func TestASubresourceInsideTheAllowSetIsAllowed(t *testing.T) {
-	for _, host := range []string{"example.com", "img.cdn.example.com", "cdn.example.com"} {
-		d := Subresource("https://"+host+"/a.png", addrs(t, "93.184.216.34"),
-			[]string{"example.com", ".cdn.example.com"})
-		if !d.Verdict.Allowed() {
-			t.Errorf("%s: got %v (%s), want allow", host, d.Verdict, d.Reason)
-		}
+	if !strings.Contains(d.Reason, "tracker.example") {
+		t.Fatalf("the reason must name the host the plane refused: %q", d.Reason)
 	}
 }
 
-// Suffix matching without the leading-dot distinction is the bug this avoids:
-// `example.com` would otherwise match `notexample.com`, which belongs to
-// somebody else and merely ends in the right letters.
-func TestADomainThatMerelyEndsInAnAllowedOneIsNotAllowed(t *testing.T) {
-	d := Subresource("https://notexample.com/a.png", addrs(t, "93.184.216.34"), []string{"example.com"})
-	if d.Verdict != DenyPolicy {
-		t.Fatalf("got %v, want DenyPolicy: notexample.com is not example.com", d.Verdict)
+func TestASubresourceThePolicyPlaneAllowsIsAllowed(t *testing.T) {
+	d := Subresource("https://cdn.example.com/a.png", addrs(t, "93.184.216.34"),
+		PolicyAnswer{Allowed: true})
+	if !d.Verdict.Allowed() {
+		t.Fatalf("got %v (%s), want allow", d.Verdict, d.Reason)
 	}
 }
 
-// An empty allow-set means the policy declared no domain restriction, so
-// subresources are bounded by the address rules and nothing else. The address
-// rules still apply, which is the half worth asserting.
-func TestWithNoAllowSetASubresourceIsStillBoundedByTheAddressRules(t *testing.T) {
-	if d := Subresource("https://anywhere.example/a.png", addrs(t, "93.184.216.34"), nil); !d.Verdict.Allowed() {
-		t.Fatalf("no allow-set means no domain restriction, got %v", d.Verdict)
+// An unreachable plane is its own refusal (CLAUDE.md invariant 7), for a
+// subresource exactly as for a navigation: reporting it as a policy deny sends
+// an operator to edit a policy that never ran.
+func TestAnUnreachablePolicyPlaneRefusesASubresourceAsUnreachable(t *testing.T) {
+	d := Subresource("https://cdn.example.com/a.png", addrs(t, "93.184.216.34"),
+		PolicyAnswer{Unreachable: true, Reason: "the policy plane could not be reached"})
+	if d.Verdict != DenyPolicyUnreachable {
+		t.Fatalf("got %v, want DenyPolicyUnreachable", d.Verdict)
 	}
-	if d := Subresource("https://anywhere.example/a.png", addrs(t, "169.254.169.254"), nil); d.Verdict != DenyAddress {
-		t.Fatalf("the address rules still apply with no allow-set, got %v", d.Verdict)
+}
+
+// The address rules come before the policy answer, which is the half worth
+// asserting: a policy allow does not reach past them.
+func TestAnAllowedSubresourceIsStillBoundedByTheAddressRules(t *testing.T) {
+	if d := Subresource("https://anywhere.example/a.png", addrs(t, "169.254.169.254"),
+		PolicyAnswer{Allowed: true}); d.Verdict != DenyAddress {
+		t.Fatalf("the address rules still apply to an allowed host, got %v", d.Verdict)
 	}
 }

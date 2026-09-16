@@ -140,8 +140,18 @@ func (c *Chromium) Fetch(ctx context.Context, req Request) (Result, error) {
 
 	// The floor. Started before the browser so there is no window in which the
 	// browser exists and its only exit does not.
+	//
+	// The decider is asked on THIS fetch's context and not on the proxy's,
+	// which serves each browser connection on a context of its own. Everything
+	// the fetch established travels on its context (the policy memo, the
+	// checked addresses), and a question asked without it has none of that to
+	// answer with: the floor would refuse every host the accountant allowed.
+	// Measured 2026-09-16, before this line: a page with one allowed stylesheet
+	// rendered with the stylesheet's server never reached.
 	px := &browserproxy.Proxy{
-		Decide:  browserproxy.DeciderFunc(c.forProxy),
+		Decide: browserproxy.DeciderFunc(func(_ context.Context, scheme, host string) ([]netip.Addr, decide.Decision) {
+			return c.Decide(ctx, browserproxy.URLOf(scheme, host))
+		}),
 		Dial:    c.Dial,
 		Timeout: c.Timeout,
 	}
@@ -238,14 +248,6 @@ func sandboxAdvice(said string) string {
 	return " This is the browser's sandbox, not scopyx. Run the container as a " +
 		"non-root user with the namespaces Chrome needs, which keeps the sandbox, or set " +
 		"SCOPYX_CHROMIUM_NO_SANDBOX=1, which turns it off and is a decision rather than a fix."
-}
-
-// forProxy adapts the plane's decider to the shape the proxy asks in.
-//
-// It builds the URL and hands it on. No verdict is constructed here and none
-// may be: see the Decide field.
-func (c *Chromium) forProxy(ctx context.Context, scheme, host string) ([]netip.Addr, decide.Decision) {
-	return c.Decide(ctx, browserproxy.URLOf(scheme, host))
 }
 
 type fetchPaused struct {

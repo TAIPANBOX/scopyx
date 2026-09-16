@@ -136,12 +136,14 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 		// decision that said no.
 		ctx = pin.With(ctx, u.Hostname(), addrs)
 
-		// And the navigation's allow-set travels with it, for a backend that
-		// fetches subresources this loop never sees. It decides them with the
-		// same pure function and the same policy answer; without this it would
-		// have to hold its own idea of what is allowed, which is invariant 1
-		// broken from the inside.
-		ctx = decide.WithAllowDomains(ctx, answer.PolicyAnswer.AllowDomains)
+		// And this fetch's memo travels with it, for a backend that fetches
+		// subresources this loop never sees. Each of those is a destination the
+		// caller never named and a question for the policy plane in its own
+		// right; the memo is how they are asked once per host rather than once
+		// per request, and how the answers stay this fetch's and this caller's.
+		// Without it the backend would have to hold its own idea of what is
+		// allowed, which is invariant 1 broken from the inside.
+		ctx = policy.WithMemo(ctx, d.Memo)
 
 		// The site's own preference, asked AFTER the operator's policy and
 		// before the fetch. The order is deliberate: a destination the

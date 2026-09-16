@@ -67,7 +67,13 @@ func (f *fixture) add(host string, srv *httptest.Server, n int) {
 	f.serverAt[addr] = strings.TrimPrefix(strings.TrimPrefix(srv.URL, "http://"), "https://")
 }
 
-func (f *fixture) apply(c *Chromium, allowDomains []string) {
+// apply wires the fixture's resolver and dial in, with a decider that answers
+// as a policy plane would: every host allowed except the ones named.
+func (f *fixture) apply(c *Chromium, refuse ...string) {
+	refused := map[string]bool{}
+	for _, h := range refuse {
+		refused[h] = true
+	}
 	c.Decide = func(_ context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
 		u, err := url.Parse(rawURL)
 		if err != nil {
@@ -79,7 +85,9 @@ func (f *fixture) apply(c *Chromium, allowDomains []string) {
 				Reason: "no fixture address for " + u.Hostname()}
 		}
 		addrs := []netip.Addr{netip.MustParseAddr(a)}
-		return addrs, decide.Subresource(rawURL, addrs, allowDomains)
+		return addrs, decide.Subresource(rawURL, addrs, decide.PolicyAnswer{
+			Allowed: !refused[u.Hostname()], Reason: "fixture policy",
+		})
 	}
 	c.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, _, err := net.SplitHostPort(addr)
@@ -107,13 +115,13 @@ func newChromium(t *testing.T) *Chromium {
 	return c
 }
 
-// The property the backend exists for: a subresource the allow-set refuses is
+// The property the backend exists for: a subresource the policy refuses is
 // not fetched, and the assertion is on the SERVER that would have served it.
 //
 // An outcome assertion would pass equally well if the request happened and the
 // answer were discarded, which is the difference between governing egress and
 // filtering a report about it.
-func TestASubresourceTheAllowSetRefusesNeverReachesItsServer(t *testing.T) {
+func TestASubresourceThePolicyRefusesNeverReachesItsServer(t *testing.T) {
 	c := newChromium(t)
 
 	var docHits, allowedHits, deniedHits atomic.Int64
@@ -142,7 +150,7 @@ func TestASubresourceTheAllowSetRefusesNeverReachesItsServer(t *testing.T) {
 	f.add("doc.example", doc, 1)
 	f.add("allowed.example", allowed, 2)
 	f.add("tracker.example", denied, 3)
-	f.apply(c, []string{"doc.example", "allowed.example"})
+	f.apply(c, "tracker.example")
 
 	res, err := c.Fetch(context.Background(), Request{URL: "http://doc.example/page"})
 	if err != nil {
@@ -192,7 +200,7 @@ func TestItRendersRatherThanReturningTheShell(t *testing.T) {
 
 	f := newFixture()
 	f.add("app.example", srv, 1)
-	f.apply(c, nil)
+	f.apply(c)
 
 	res, err := c.Fetch(context.Background(), Request{URL: "http://app.example/"})
 	if err != nil {
@@ -226,7 +234,7 @@ func TestANavigationRedirectIsReportedAndNotFollowed(t *testing.T) {
 	f := newFixture()
 	f.add("first.example", first, 1)
 	f.add("second.example", target, 2)
-	f.apply(c, nil)
+	f.apply(c)
 
 	res, err := c.Fetch(context.Background(), Request{URL: "http://first.example/notice"})
 	if err != nil {
@@ -322,7 +330,7 @@ func TestTheProfileIsFreshPerFetchAndRemovedAfter(t *testing.T) {
 	defer srv.Close()
 	f := newFixture()
 	f.add("x.example", srv, 1)
-	f.apply(c, nil)
+	f.apply(c)
 
 	before := profileDirs(t)
 	if _, err := c.Fetch(context.Background(), Request{URL: "http://x.example/"}); err != nil {
@@ -346,4 +354,67 @@ func profileDirs(t *testing.T) int {
 		}
 	}
 	return n
+}
+
+// fetchMarker stands in for everything a fetch establishes on its context
+// before the backend is called: the pinned addresses, the per-fetch policy
+// memo. The decider needs those to answer, and it is asked from two places:
+// CDP interception, on the fetch's own context, and the proxy, which serves
+// each browser connection on a context of its own. If the second question
+// arrives without what the first one carried, the floor refuses everything
+// the accountant allowed.
+type fetchMarker struct{}
+
+func TestTheProxyAsksTheDeciderWithTheFetchsOwnContext(t *testing.T) {
+	c := newChromium(t)
+	c.Timeout = 20 * time.Second
+
+	var allowedHits atomic.Int64
+	allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		allowedHits.Add(1)
+		w.Header().Set("Content-Type", "text/css")
+		_, _ = w.Write([]byte("body{color:#000}"))
+	}))
+	defer allowed.Close()
+	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><head>` +
+			`<link rel="stylesheet" href="http://allowed.example/a.css">` +
+			`</head><body><h1>the document itself</h1></body></html>`))
+	}))
+	defer doc.Close()
+
+	f := newFixture()
+	f.add("doc.example", doc, 1)
+	f.add("allowed.example", allowed, 2)
+	f.apply(c)
+
+	inner := c.Decide
+	c.Decide = func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
+		if ctx.Value(fetchMarker{}) == nil {
+			return nil, decide.Decision{Verdict: decide.DenyPolicyUnreachable,
+				Reason: "asked on a context that is not the fetch's, so nothing the fetch " +
+					"established travelled with the question"}
+		}
+		return inner(ctx, rawURL)
+	}
+
+	ctx := context.WithValue(context.Background(), fetchMarker{}, true)
+	res, err := c.Fetch(ctx, Request{URL: "http://doc.example/page"})
+	if err != nil {
+		t.Fatalf("a page every decision allows must render: %v", err)
+	}
+	if allowedHits.Load() == 0 {
+		t.Fatal("the allowed subresource never reached its server: the proxy asked the decider " +
+			"on a context of its own, and what the fetch established was missing from the question")
+	}
+	// Only the page's own subresource is asserted on. The browser's own
+	// background traffic (component updates, despite the flag that disables
+	// them) also reaches the floor, is refused there because no fixture
+	// address exists for it, and is rightly counted as blocked.
+	for _, s := range res.Subresources {
+		if s.Blocked && strings.Contains(s.URL, "allowed.example") {
+			t.Errorf("the allowed subresource was counted as blocked: %s", s.URL)
+		}
+	}
 }

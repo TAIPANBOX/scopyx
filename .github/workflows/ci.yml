@@ -96,6 +96,9 @@ jobs:
       - name: the 1.0 compatibility surface is present in the code and rendered
         run: ./scripts/compat-surface.sh
 
+      - name: every scenario names a test that exists
+        run: ./scripts/features-are-bound.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that started writing into the checkout.

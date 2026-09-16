@@ -118,19 +118,7 @@ func run(log *slog.Logger) error {
 	// find its own resolver could find a different one, which is invariant 1
 	// broken quietly.
 	if ch, ok := back.(*backend.Chromium); ok {
-		ch.Decide = func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
-			u, err := url.Parse(rawURL)
-			if err != nil {
-				return nil, decide.Decision{Verdict: decide.DenyScheme,
-					Reason: "the subresource URL could not be parsed: " + err.Error()}
-			}
-			addrs, err := systemResolver{}.Resolve(ctx, u.Hostname())
-			if err != nil {
-				return nil, decide.Decision{Verdict: decide.DenyAddress,
-					Reason: "the host could not be resolved: " + err.Error()}
-			}
-			return addrs, decide.Subresource(rawURL, addrs, decide.AllowDomainsFrom(ctx))
-		}
+		ch.Decide = subresourceDecider(systemResolver{})
 	}
 
 	journal, err := record.Open(os.Getenv("SCOPYX_EVENTS"), os.Getenv("SCOPYX_RETAIN") == "payload")
@@ -351,6 +339,41 @@ func (g *governed) Fetch(ctx context.Context, c mcp.Call) (mcp.Answer, error) {
 	g.journal.Fetch(c.AgentID, c.RunID, res.FinalURL,
 		res.Fidelity.Backend, string(res.Fidelity.Enforcement), res.Fidelity.ContentBytes)
 	return mcp.Answer{Body: res.Body, FinalURL: res.FinalURL, Fidelity: res.Fidelity}, nil
+}
+
+// subresourceDecider is the one function the rendering backend is given: it
+// resolves one subresource, asks the policy plane about its host through the
+// fetch's own memo, and decides; the backend constructs no verdict of its own
+// (invariant 1). The resolver is a parameter so the end-to-end test can decide
+// about names that exist only in a fixture.
+//
+// The memo comes off the context `internal/fetch` prepared, and a context no
+// fetch prepared carries none. That is a refusal, not an allow: with no memo
+// there is nobody to ask, and this plane does not decide a destination nobody
+// was asked about.
+func subresourceDecider(res fetch.Resolver) func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
+	return func(ctx context.Context, rawURL string) ([]netip.Addr, decide.Decision) {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return nil, decide.Decision{Verdict: decide.DenyScheme,
+				Reason: "the subresource URL could not be parsed: " + err.Error()}
+		}
+		addrs, err := res.Resolve(ctx, u.Hostname())
+		if err != nil {
+			return nil, decide.Decision{Verdict: decide.DenyAddress,
+				Reason: "the host could not be resolved: " + err.Error()}
+		}
+		memo := policy.MemoFrom(ctx)
+		if memo == nil {
+			return addrs, decide.Subresource(rawURL, addrs, decide.PolicyAnswer{
+				Unreachable: true,
+				Reason: "no policy memo travelled with this fetch, so there was nobody to ask " +
+					"about the subresource",
+			})
+		}
+		answer := memo.Host(ctx, u.Hostname())
+		return addrs, decide.Subresource(rawURL, addrs, answer.PolicyAnswer)
+	}
 }
 
 // systemResolver is the real one.
