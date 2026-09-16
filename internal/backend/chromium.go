@@ -372,6 +372,28 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		return Result{}, err
 	}
 
+	// wait_for's selector is checked HERE, on the target's still-blank
+	// document, before Page.navigate: a Fable review round 2 (2026-09-16)
+	// found that checking it after navigation (the first cut of this fix,
+	// finding 1) meant an invalid selector was still refused only once the
+	// page and every allowed subresource had already left through the
+	// proxy, as a plain error carrying Result{}: FinalURL empty, which
+	// governed.Fetch (cmd/scopyx) reads as "the backend fetched nothing".
+	// That was finding 3's hole reopened on the path finding 1 created.
+	//
+	// document.querySelector's syntax check does not depend on the document
+	// it runs against, so checking it here answers the same question with
+	// zero egress instead of an egress record: nothing is fetched for a
+	// typo, so Result{} here is honest rather than a gap. waitFor's own
+	// first-evaluate check (below) stays as defence in depth; it cannot
+	// fire for a selector that already passed here, because validity does
+	// not change between the two documents.
+	if req.WaitFor != "" {
+		if err := c.validateWaitForSelector(ctx, conn, sid, req.WaitFor); err != nil {
+			return Result{}, err
+		}
+	}
+
 	var nav struct {
 		ErrorText string `json:"errorText"`
 	}
@@ -404,41 +426,55 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		return Result{RedirectTo: hop, FinalURL: req.URL, Subresources: mergeCounts(counted, px)}, nil
 	}
 
+	trunc := decide.Truncation("")
+	if req.WaitFor != "" {
+		t, err := c.waitFor(ctx, conn, sid, req.WaitFor)
+		if err != nil {
+			return Result{}, err
+		}
+		trunc = t
+	}
+
+	finalURL := evalString(ctx, conn, sid, "location.href")
+	if finalURL == "" || finalURL == "about:blank" {
+		finalURL = req.URL
+	}
+
+	if req.Extract == "screenshot" {
+		return c.captureScreenshot(ctx, conn, sid, finalURL, trunc, px, snapshot)
+	}
+
+	expr := "document.documentElement ? document.documentElement.outerHTML : ''"
+	if req.Extract == "text" {
+		expr = "document.body ? document.body.innerText : ''"
+	}
 	var eval struct {
 		Result struct {
 			Value string `json:"value"`
 		} `json:"result"`
 	}
-	expr := "document.documentElement ? document.documentElement.outerHTML : ''"
-	if req.Extract == "text" {
-		expr = "document.body ? document.body.innerText : ''"
-	}
 	if err := conn.Call(ctx, sid, "Runtime.evaluate",
 		map[string]any{"expression": expr, "returnByValue": true}, &eval); err != nil {
 		return Result{}, err
 	}
-
 	body := []byte(eval.Result.Value)
-	trunc := decide.Truncation("")
 	if int64(len(body)) > c.MaxBodyBytes {
 		body = body[:c.MaxBodyBytes]
-		trunc = decide.TruncatedByBytes
+		// The body is cut to fit regardless, but the RECORDED reason is not
+		// overwritten when wait_for already spent the bound: `time` is kept
+		// rather than silently replaced by `bytes`, because a caller who
+		// asked to wait for something already knows the page was still
+		// forming, and losing that fact to a second, unrelated bound is the
+		// same over-claim invariant 5 exists to refuse, just moved to a
+		// different field. See CLAUDE.md invariant 5: time wins when both
+		// bounds are hit in the same fetch.
+		if trunc == decide.TruncatedNone {
+			trunc = decide.TruncatedByBytes
+		}
 	}
 
-	var final struct {
-		Result struct {
-			Value string `json:"value"`
-		} `json:"result"`
-	}
-	_ = conn.Call(ctx, sid, "Runtime.evaluate",
-		map[string]any{"expression": "location.href", "returnByValue": true}, &final)
-	finalURL := final.Result.Value
-	if finalURL == "" || finalURL == "about:blank" {
-		finalURL = req.URL
-	}
-
-	// Taken again rather than reused: the evaluate calls above are round trips
-	// to the browser, and a page's own scripts keep fetching during them.
+	// Taken again rather than reused: the evals above are round trips to the
+	// browser, and a page's own scripts keep fetching during them.
 	_, counted = snapshot()
 
 	return Result{
@@ -448,6 +484,242 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		Subresources: mergeCounts(counted, px),
 		TruncatedBy:  trunc,
 	}, nil
+}
+
+// waitForReserve is held back from wait_for's own bound so the extraction that
+// follows it, the location.href read and either the outerHTML/innerText or
+// the screenshot call, keeps a working context instead of one that is already
+// past its deadline.
+//
+// Without this, wait_for's bound WOULD be the whole fetch's remaining
+// timeout, and a selector that never appears would consume every bit of it,
+// leaving the extraction calls after it to fail with a context already done,
+// which is the opposite of what this exists for: the document must still come
+// back.
+const waitForReserve = 2 * time.Second
+
+// waitForMinimum is the floor on the bound itself, so a fetch whose timeout is
+// nearly spent still gets at least a couple of polls rather than a bound of
+// zero that would report time-truncated without ever having asked once.
+const waitForMinimum = 300 * time.Millisecond
+
+// waitForPoll is how often the selector is re-checked.
+const waitForPoll = 100 * time.Millisecond
+
+// waitForExpr builds the document.querySelector expression wait_for
+// evaluates, with the selector carried as a JSON string literal rather than
+// by concatenation, so a selector holding a quote and a closing parenthesis
+// cannot break out of the querySelector(...) call it sits inside; see
+// TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
+func waitForExpr(selector string) (string, error) {
+	selJSON, err := json.Marshal(selector)
+	if err != nil {
+		return "", err
+	}
+	return "document.querySelector(" + string(selJSON) + ") !== null", nil
+}
+
+// validateWaitForSelector checks wait_for's selector for CSS validity on the
+// target's still-blank document, BEFORE Page.navigate ever runs.
+//
+// document.querySelector's syntax check does not depend on the document it
+// runs against, so checking it here, before navigation, answers the same
+// question waitFor's own first evaluate answers after navigation, but with
+// zero egress for an invalid selector rather than an egress record: no
+// Page.navigate, no subresources, nothing through the proxy. A Fable review
+// round 2 (2026-09-16) found that checking only after navigation (the first
+// cut of this fix, finding 1) let a typo still fetch the document before
+// being refused, and the refusal's Result{} then read, wrongly, as "the
+// backend fetched nothing" (finding 3's hole, reopened on the path finding 1
+// created). Run red first against that code: the document server was hit
+// once before the error came back.
+func (c *Chromium) validateWaitForSelector(ctx context.Context, conn *cdp.Conn, sid, selector string) error {
+	expr, err := waitForExpr(selector)
+	if err != nil {
+		// Every Go string marshals to JSON; this is unreachable in practice
+		// and guarded rather than ignored because a silent skip here would be
+		// a wait_for that was accepted and quietly never validated.
+		return nil
+	}
+	if _, exception := c.evalWaitFor(ctx, conn, sid, expr); exception != "" {
+		return fmt.Errorf("scopyx: wait_for %q is not a valid CSS selector: %s", selector, exception)
+	}
+	return nil
+}
+
+// waitFor polls document.querySelector(selector) until it is non-null or its
+// own bound elapses, and returns the truncation to report: none if the
+// selector appeared, time if the bound ran out first. An error means the
+// selector itself is not valid CSS, named in the error text, and the caller
+// must not be told the fetch merely ran long. In practice this cannot fire
+// for a selector that already passed validateWaitForSelector above, since
+// validity does not change between the target's blank document and the
+// navigated one; kept as defence in depth rather than removed.
+//
+// It never returns an error for a selector that is valid CSS and merely did
+// not appear: a caller who asked to wait for something that never shows up
+// still gets the document, which is invariant 5's shape applied to this one
+// argument.
+//
+// Every Runtime.evaluate call in this function runs on waitCtx, not ctx: the
+// fetch's own context stays alive until the whole fetch's timeout, which
+// would let one evaluate blocked by a busy page main thread eat waitForReserve
+// and fail the extraction that follows rather than failing here, inside the
+// bound that exists to hold that cost.
+func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector string) (decide.Truncation, error) {
+	bound := waitForMinimum
+	if dl, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(dl) - waitForReserve; remaining > bound {
+			bound = remaining
+		}
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+
+	expr, err := waitForExpr(selector)
+	if err != nil {
+		// Every Go string marshals to JSON; this is unreachable in practice
+		// and guarded rather than ignored because a silent skip here would be
+		// a wait_for that was accepted and quietly never waited on.
+		return decide.TruncatedByTime, nil
+	}
+
+	// The FIRST evaluate is read for exceptionDetails specifically. An
+	// invalid selector, "##not-a-selector" say, throws inside
+	// document.querySelector, and CDP answers that as exceptionDetails on an
+	// otherwise-successful Runtime.evaluate call: conn.Call's own error stays
+	// nil and found.Result.Value stays false, on every single poll, forever,
+	// which is indistinguishable from a selector that is merely absent.
+	// Unchecked, the loop below polls for the WHOLE bound and reports
+	// truncated_by: time, reporting the page as slow when the selector was
+	// invalid from the first call. A selector's validity cannot change
+	// between polls of the same document, so checking once here is enough;
+	// later polls only need the match itself.
+	// Measured against the unfixed backend, 2026-09-16: WaitFor
+	// "##not-a-selector" at a 6s timeout burned 4.1s, err nil, TruncatedBy
+	// "time".
+	matched, exception := c.evalWaitFor(waitCtx, conn, sid, expr)
+	if exception != "" {
+		return decide.TruncatedByTime, fmt.Errorf(
+			"scopyx: wait_for %q is not a valid CSS selector: %s", selector, exception)
+	}
+	if matched {
+		return decide.TruncatedNone, nil
+	}
+
+	ticker := time.NewTicker(waitForPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if matched, _ := c.evalWaitFor(waitCtx, conn, sid, expr); matched {
+				return decide.TruncatedNone, nil
+			}
+		case <-waitCtx.Done():
+			return decide.TruncatedByTime, nil
+		}
+	}
+}
+
+// evalWaitFor runs the wait_for expression once and reports whether it
+// matched. exception carries the browser's own exception text when the
+// selector itself is invalid CSS; conn.Call's own error is a transport or CDP
+// failure, not a JS exception, and is treated here as "no match yet" rather
+// than as the selector's fault, because a selector's validity is what
+// exceptionDetails answers, never a dropped call.
+func (c *Chromium) evalWaitFor(ctx context.Context, conn *cdp.Conn, sid, expr string) (matched bool, exception string) {
+	var found struct {
+		Result struct {
+			Value bool `json:"value"`
+		} `json:"result"`
+		ExceptionDetails *struct {
+			Text      string `json:"text"`
+			Exception struct {
+				Description string `json:"description"`
+			} `json:"exception"`
+		} `json:"exceptionDetails"`
+	}
+	if err := conn.Call(ctx, sid, "Runtime.evaluate",
+		map[string]any{"expression": expr, "returnByValue": true}, &found); err != nil {
+		return false, ""
+	}
+	if found.ExceptionDetails != nil {
+		if found.ExceptionDetails.Exception.Description != "" {
+			return false, found.ExceptionDetails.Exception.Description
+		}
+		return false, found.ExceptionDetails.Text
+	}
+	return found.Result.Value, ""
+}
+
+// captureScreenshot renders the page as a PNG and returns it base64-encoded,
+// the body extraction for extract=screenshot.
+//
+// Bounded by MaxBodyBytes like the other extracts, but refused rather than
+// truncated when it does not fit: a PNG cut at an arbitrary byte offset is
+// not a smaller picture, it is bytes that fail to decode, so handing one back
+// would be a truncation flag standing in for an unusable file. Refusing
+// loudly names the actual bound (raise SCOPYX_MAX_BYTES, or ask for text or
+// html instead) rather than returning something that only looks like an
+// answer.
+func (c *Chromium) captureScreenshot(ctx context.Context, conn *cdp.Conn, sid, finalURL string,
+	trunc decide.Truncation, px *browserproxy.Proxy, snapshot func() (string, []Subresource)) (Result, error) {
+	var shot struct {
+		Data string `json:"data"`
+	}
+	if err := conn.Call(ctx, sid, "Page.captureScreenshot",
+		map[string]any{"format": "png"}, &shot); err != nil {
+		return Result{}, fmt.Errorf("scopyx: the screenshot could not be captured: %w", err)
+	}
+	body := []byte(shot.Data)
+	if int64(len(body)) > c.MaxBodyBytes {
+		_, counted := snapshot()
+		// FinalURL and Subresources travel WITH the error rather than being
+		// dropped as Result{}: the page and its allowed subresources already
+		// left through the proxy before the capture came back oversized, and
+		// a caller with the journal (cmd/scopyx's governed.Fetch) needs that
+		// to record the egress that happened rather than a trail with
+		// nothing on it. See finding 3, 2026-09-16. ContentBytes carries the
+		// base64 length too, a Fable review round 2 nit (2026-09-16): Body
+		// stays empty because the bytes are refused, not truncated, and
+		// without this the record's content_bytes read 0, understating what
+		// was actually captured.
+		return Result{
+			FinalURL:     finalURL,
+			Subresources: mergeCounts(counted, px),
+			TruncatedBy:  trunc,
+			ContentBytes: int64(len(body)),
+		}, fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG (as base64), over the "+
+			"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
+			"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
+			"text or html instead", len(body), c.MaxBodyBytes)
+	}
+
+	_, counted := snapshot()
+	return Result{
+		FinalURL:     finalURL,
+		Body:         body,
+		HTTPStatus:   200,
+		Subresources: mergeCounts(counted, px),
+		TruncatedBy:  trunc,
+	}, nil
+}
+
+// evalString runs a JS expression and reads back its string value, empty on
+// any failure. Used only for location.href, exactly as before this change:
+// a failed read falls back to the request URL a few lines down, and that
+// fallback (not an error return) is the existing, unchanged behaviour for
+// this one probe. The body extraction below is deliberately NOT built on
+// this helper, because that call errors the fetch on failure and always has.
+func evalString(ctx context.Context, conn *cdp.Conn, sid, expr string) string {
+	var eval struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	_ = conn.Call(ctx, sid, "Runtime.evaluate",
+		map[string]any{"expression": expr, "returnByValue": true}, &eval)
+	return eval.Result.Value
 }
 
 // mergeCounts reports what the ACCOUNTANT saw, plus anything the FLOOR refused

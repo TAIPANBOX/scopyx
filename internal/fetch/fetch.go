@@ -165,7 +165,21 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 
 		res, err := d.Backend.Fetch(ctx, current)
 		if err != nil {
-			return Result{}, err
+			// A backend can refuse AFTER it already fetched something: an
+			// over-bound screenshot is captured, then refused for its size,
+			// with the page and its allowed subresources already out through
+			// the pinned dialer and the proxy floor. That egress is real and
+			// the trail must be able to say so, so whatever the backend could
+			// report about it travels with the error rather than being
+			// discarded as Result{}.
+			//
+			// FinalURL is deliberately NOT defaulted to current.URL here, the
+			// way the success path below defaults it: a backend that fetched
+			// nothing before erroring (passthrough's screenshot refusal, or
+			// any ordinary connection failure) reports Result{}, and an empty
+			// FinalURL is how the caller tells "nothing left" from "something
+			// did" without inventing a URL for a fetch that never happened.
+			return Result{FinalURL: res.FinalURL, Fidelity: fidelityFor(d.Backend, res, current.Extract)}, err
 		}
 
 		if res.RedirectTo == "" {
@@ -175,7 +189,7 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 				// by an empty list.
 				res.Redirects = hops
 			}
-			f := fidelityFor(d.Backend, res)
+			f := fidelityFor(d.Backend, res, current.Extract)
 			if err := f.Check(); err != nil {
 				return Result{}, err
 			}
@@ -227,12 +241,23 @@ const absoluteMaxRedirects = 32
 // concludes the page asked for nothing and everything succeeded. That is the
 // silent-zero failure this estate keeps finding, and it would have been
 // written here by anybody not looking for it.
-func fidelityFor(b backend.Backend, res backend.Result) decide.Fidelity {
+func fidelityFor(b backend.Backend, res backend.Result, extract string) decide.Fidelity {
+	if extract == "" {
+		extract = "html"
+	}
+	contentBytes := int64(len(res.Body))
+	if res.ContentBytes > 0 {
+		// A backend that saw content but withheld it from Body, the refused
+		// over-bound screenshot being the case that needed this: len(Body)
+		// alone would report 0 and understate what was actually captured.
+		contentBytes = res.ContentBytes
+	}
 	f := decide.Fidelity{
 		Backend:      b.Name(),
 		Enforcement:  b.Enforcement(),
+		Extract:      extract,
 		HTTPStatus:   res.HTTPStatus,
-		ContentBytes: int64(len(res.Body)),
+		ContentBytes: contentBytes,
 		RedirectHops: len(res.Redirects),
 		TruncatedBy:  res.TruncatedBy,
 	}

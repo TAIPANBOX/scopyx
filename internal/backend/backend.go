@@ -63,6 +63,17 @@ type Result struct {
 	// Enforcement value, which says navigation_only, and not a field suggesting
 	// the hop was available for review when it was not.
 	RedirectTo string
+
+	// ContentBytes overrides len(Body) for the record, when a backend saw
+	// content it is deliberately not returning in Body. The refused
+	// over-bound screenshot is the case that needed this (a Fable review
+	// round 2 nit, 2026-09-16): the capture happened and its size is known,
+	// but the bytes themselves are withheld because they are refused rather
+	// than truncated, and Body stays empty. Without this, the journal's
+	// content_bytes read 0, understating what was actually captured and
+	// reading like an empty fetch rather than a refused one. Zero means
+	// "use len(Body)", which is every other case.
+	ContentBytes int64
 }
 
 // Backend performs a fetch that has already been decided.

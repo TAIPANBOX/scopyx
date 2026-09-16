@@ -158,6 +158,32 @@ func TestItNamesItselfRatherThanImpersonatingABrowser(t *testing.T) {
 	}
 }
 
+// This backend makes one HTTP request and renders nothing, so there is no
+// page to screenshot. Until 2026-09-16 it silently returned the page's raw
+// HTML for extract=screenshot, which is exactly the invariant-5 failure this
+// repository exists to refuse: a caller asking for a screenshot got a body
+// that looked like an answer and was not the one they asked for.
+func TestPassthroughRefusesScreenshotRatherThanReturningHTML(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("<html><body>not a screenshot</body></html>"))
+	}))
+	defer srv.Close()
+
+	_, err := NewPassthrough(1<<20, 2*time.Second).Fetch(
+		context.Background(), Request{URL: srv.URL, Extract: "screenshot"})
+	if err == nil {
+		t.Fatal("extract=screenshot must be refused by a backend that cannot render one")
+	}
+	if !strings.Contains(err.Error(), "screenshot") {
+		t.Errorf("the refusal must name what was refused, got %q", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("the server was reached %d time(s); a refusal should not even make the request", hits.Load())
+	}
+}
+
 // Both bounds are finite whatever the caller passes. A zero timeout is a fetch
 // that hangs rather than one that is refused.
 func TestTheBoundsAreFiniteEvenWhenTheCallerPassesZero(t *testing.T) {

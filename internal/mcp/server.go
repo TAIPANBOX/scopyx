@@ -190,7 +190,7 @@ func (s *Server) call(ctx context.Context, w http.ResponseWriter, req rpcRequest
 
 	writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 		"isError": false,
-		"content": []map[string]any{{"type": "text", "text": string(ans.Body)}},
+		"content": contentFor(ans),
 		// The fidelity block travels with every answer rather than on request.
 		// Invariant 5: a partial page must be visible as one, and a field the
 		// caller has to ask for is a field nobody asks for.
@@ -199,6 +199,28 @@ func (s *Server) call(ctx context.Context, w http.ResponseWriter, req rpcRequest
 			"fidelity":  ans.Fidelity,
 		},
 	}})
+}
+
+// contentFor picks the MCP content kind the answer's bytes actually are.
+//
+// Until 2026-09-16 a screenshot left this server as {"type":"text",
+// "text":"<base64>"}: an MCP client hands text content to the MODEL as text,
+// so the model read a base64 blob rather than the picture extract=screenshot
+// exists to deliver. MCP's own image content kind, {"type":"image",
+// "data":...,"mimeType":...}, is what a client renders as a picture instead.
+//
+// Additive rather than a compat break: compat/1.0.json freezes
+// mcp.extract_values, not the MCP content kind an answer is wrapped in, and
+// neither "text" nor "image" is among its nine frozen names.
+func contentFor(ans Answer) []map[string]any {
+	if ans.Fidelity.Extract == "screenshot" {
+		return []map[string]any{{
+			"type":     "image",
+			"data":     string(ans.Body),
+			"mimeType": "image/png",
+		}}
+	}
+	return []map[string]any{{"type": "text", "text": string(ans.Body)}}
 }
 
 // validate enforces the schema the tool publishes.

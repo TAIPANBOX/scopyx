@@ -198,6 +198,32 @@ func (c countingBackend) Fetch(context.Context, backend.Request) (backend.Result
 	return backend.Result{FinalURL: "https://example.com/x", Body: []byte("hi"), HTTPStatus: 200, Subresources: c.subs}, nil
 }
 
+// The fidelity block says what was asked for, defaulted to html when the
+// caller left it empty, because that is what an empty request already means
+// to every backend here. Added 2026-09-16 alongside the screenshot and
+// wait_for fix: before it, a caller reading the fidelity block had no field
+// to check an answer's extract kind against the request's.
+func TestFidelityNamesTheExtractThatWasRequestedDefaultedToHTML(t *testing.T) {
+	b := countingBackend{}
+	for _, tc := range []struct {
+		requested, want string
+	}{
+		{"text", "text"},
+		{"html", "html"},
+		{"screenshot", "screenshot"},
+		{"", "html"},
+	} {
+		d := deps(t, b, "allow")
+		res, err := Do(context.Background(), d, backend.Request{URL: "https://example.com/x", Extract: tc.requested})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Fidelity.Extract != tc.want {
+			t.Errorf("requested %q: Fidelity.Extract = %q, want %q", tc.requested, res.Fidelity.Extract, tc.want)
+		}
+	}
+}
+
 func TestABackendThatReportsSubresourcesGetsRealCounts(t *testing.T) {
 	b := countingBackend{subs: []backend.Subresource{
 		{URL: "a", Status: 200},
