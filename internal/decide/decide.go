@@ -1,7 +1,6 @@
 package decide
 
 import (
-	"context"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -97,10 +96,9 @@ func deny(v Verdict, format string, args ...any) Decision {
 // and that behaviour is a refusal. An error would invite a caller to log it
 // and carry on, which is the fail-open this plane refuses.
 type PolicyAnswer struct {
-	Allowed      bool
-	Unreachable  bool
-	Reason       string
-	AllowDomains []string
+	Allowed     bool
+	Unreachable bool
+	Reason      string
 }
 
 // Limits are the bounds a fetch runs inside. Every one has a finite default in
@@ -165,15 +163,23 @@ func Destination(raw string, resolved []netip.Addr, policy PolicyAnswer) Decisio
 	return allow()
 }
 
-// Subresource decides one resource a page asked for, against the allow-set the
-// policy plane returned for the navigation.
+// Subresource decides one resource a page asked for, against the policy
+// plane's answer about ITS host.
 //
 // A page is not one destination. It is a document plus fonts, images, scripts
 // and XHR, each potentially a different host, and exfiltration through a
-// subresource URL is the oldest trick there is. An empty allow-set means the
-// policy declared no domain restriction, so subresources are bounded by the
-// address rules and nothing else.
-func Subresource(raw string, resolved []netip.Addr, allowDomains []string) Decision {
+// subresource URL is the oldest trick there is. Each host is therefore its own
+// question to the policy plane, asked by the caller and answered here in the
+// same order Destination keeps: scheme, host and address first, so a
+// subresource naming something inside the deployment is refused before any
+// policy is read, then the plane's answer, with an unreachable plane a
+// refusal of its own kind rather than an allow.
+//
+// Until 2026-09-16 this took an allow-set the policy plane was supposed to
+// return for the navigation. Wardryx sends no such list, so the set was always
+// empty and every public host passed on the address rules alone, while the
+// record said per_request.
+func Subresource(raw string, resolved []netip.Addr, policy PolicyAnswer) Decision {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return deny(DenyScheme, "the subresource URL could not be parsed: %v", err)
@@ -191,8 +197,13 @@ func Subresource(raw string, resolved []netip.Addr, allowDomains []string) Decis
 			return deny(DenyAddress, "%s resolved to %s: %s", u.Hostname(), a, why)
 		}
 	}
-	if len(allowDomains) > 0 && !domainAllowed(u.Hostname(), allowDomains) {
-		return deny(DenyPolicy, "%s is not in the domains this agent may reach", u.Hostname())
+	if policy.Unreachable {
+		return deny(DenyPolicyUnreachable,
+			"the policy plane could not be asked about %s, and this plane fails closed: %s",
+			u.Hostname(), policy.Reason)
+	}
+	if !policy.Allowed {
+		return deny(DenyPolicy, "the policy plane refused %s: %s", u.Hostname(), policy.Reason)
 	}
 	return allow()
 }
@@ -209,62 +220,4 @@ func Redirect(hop int, raw string, resolved []netip.Addr, policy PolicyAnswer, l
 			"the redirect chain reached %d hops, past the bound of %d", hop, limits.MaxRedirects)
 	}
 	return Destination(raw, resolved, policy)
-}
-
-// domainAllowed matches a host against the policy's domains. A leading dot on
-// an entry means "this domain and anything under it"; an entry without one
-// matches the host exactly.
-//
-// Suffix matching without that distinction is the bug this avoids:
-// `example.com` would otherwise match `notexample.com`, which is somebody
-// else's domain that happens to end in the right letters.
-func domainAllowed(host string, allow []string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	for _, a := range allow {
-		a = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a), "."))
-		if a == "" {
-			continue
-		}
-		if strings.HasPrefix(a, ".") {
-			if h == strings.TrimPrefix(a, ".") || strings.HasSuffix(h, a) {
-				return true
-			}
-			continue
-		}
-		if h == a {
-			return true
-		}
-	}
-	return false
-}
-
-// --- the allow-set, carried to a backend that fetches subresources ---
-//
-// A rendering backend decides forty requests the caller never named, and it
-// must decide them against the SAME allow-set the navigation was granted. It
-// cannot be a field on the backend: one backend serves concurrent fetches, and
-// a field would be one fetch's policy applied to another's page.
-//
-// So it travels with the fetch, in its context. This lives here, beside
-// `Subresource`, because the allow-set is that function's parameter and a
-// helper in the backend package would be a second place that knows what a
-// policy answer contains.
-
-type allowKey struct{}
-
-// WithAllowDomains carries the navigation's allow-set.
-func WithAllowDomains(ctx context.Context, domains []string) context.Context {
-	return context.WithValue(ctx, allowKey{}, domains)
-}
-
-// AllowDomainsFrom reports the allow-set, or nil.
-//
-// Nil means the policy declared no domain restriction, which `Subresource`
-// already reads as "bounded by the address rules and nothing else". It does
-// NOT mean "allow nothing": a request with no allow-set still passes through
-// scheme, host and address, and a backend that read nil as a refusal would
-// break every page an unrestricted policy permits.
-func AllowDomainsFrom(ctx context.Context) []string {
-	d, _ := ctx.Value(allowKey{}).([]string)
-	return d
 }

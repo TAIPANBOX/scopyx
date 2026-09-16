@@ -112,3 +112,26 @@ func (m *Memo) Counts() (asked, reused int) {
 	defer m.mu.Unlock()
 	return m.asked, m.reused
 }
+
+// --- the memo, carried to a backend that fetches subresources ---
+//
+// A rendering backend decides forty requests the caller never named, and each
+// one is a question for the policy plane. It cannot hold the memo as a field:
+// one backend serves concurrent fetches, and a field would be one fetch's
+// answers applied to another's page. So the memo travels with the fetch, on
+// its context, the same way the pinned addresses do.
+
+type memoKey struct{}
+
+// WithMemo carries this fetch's memo to whatever decides its subresources.
+func WithMemo(ctx context.Context, m *Memo) context.Context {
+	return context.WithValue(ctx, memoKey{}, m)
+}
+
+// MemoFrom reports the fetch's memo, or nil when no fetch prepared this
+// context. Nil is not "ask nobody and allow": a caller with no memo has nobody
+// to ask, and nobody to ask is a refusal.
+func MemoFrom(ctx context.Context) *Memo {
+	m, _ := ctx.Value(memoKey{}).(*Memo)
+	return m
+}

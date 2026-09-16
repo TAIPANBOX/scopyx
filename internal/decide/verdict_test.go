@@ -72,3 +72,27 @@ func TestAnythingThatIsNotAllowRendersAsADenial(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryVerdictPrintsSomethingAndNoTwoPrintTheSame(t *testing.T) {
+	t.Parallel()
+
+	// The verdict string is what a record carries and what an operator reads.
+	// A verdict missing from the switch falls to whatever the default is, and
+	// two verdicts sharing a string make a record ambiguous about which rule
+	// refused a fetch.
+	seen := map[string]Verdict{}
+	for v := Allow; v <= DenyRobots; v++ {
+		s := v.String()
+		if s == "" {
+			t.Errorf("verdict %d prints nothing", int(v))
+			continue
+		}
+		if prev, dup := seen[s]; dup {
+			t.Errorf("verdicts %d and %d both print %q", int(prev), int(v), s)
+		}
+		seen[s] = v
+	}
+	if len(seen) < 2 {
+		t.Fatalf("only %d distinct verdict strings, so this measured nothing", len(seen))
+	}
+}

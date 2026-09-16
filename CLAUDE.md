@@ -63,6 +63,7 @@ go build ./...
 ./scripts/no-warm-context.sh
 ./scripts/no-compliance-claims.sh
 ./scripts/compat-surface.sh      # invariant 14; compat/1.0.json against the code, COMPATIBILITY.md rendered
+./scripts/features-are-bound.sh  # invariant 15; every scenario in features/ names a test that exists
 ./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
 
@@ -94,9 +95,11 @@ true. An invariant with no check, written as though it had one, is worse than
 an absent invariant.
 
 1. **Every control enforces at this layer and none is delegated to a backend.**
-   The destination decision, the subresource allow-set, the address-range
-   refusals, the redirect re-evaluation, the caps and the record are made
-   before and around the backend call, never inside it. A backend may be
+   The destination decision, the decision about every subresource (one
+   question to the policy plane per host, asked through the fetch's own memo,
+   and nobody to ask is a refusal), the address-range refusals, the redirect
+   re-evaluation, the caps and the record are made before and around the
+   backend call, never inside it. A backend may be
    Kitesurf, the operator's own Playwright, or their existing Firecrawl
    account: none of them is ours, and one that happens to enforce something
    today can change under us without saying so.
@@ -111,7 +114,17 @@ an absent invariant.
    resolution failing. It now takes ONE function that does both, supplied from
    above, and constructs nothing. What the gate cannot see is a backend that
    read a vendor's header and quietly returned fewer subresources; what catches
-   that is the fidelity block being nil rather than zero, and a reader.)*
+   that is the fidelity block being nil rather than zero, and a reader.
+
+   The subresource half was a claim and not a fact until 2026-09-16. The
+   decider took an allow-set the policy plane never sends, so every public
+   host passed on the address rules alone while the record said per_request,
+   and the proxy under the browser asked the decider on a context of its own.
+   Held now by `cmd/scopyx`'s `TestASubresourceThePolicyPlaneRefusesNeverReachesItsServer`
+   against a real browser, run red first: the refused host's server was
+   reached once and the policy plane had never been asked about it; plus
+   five decider cases there and `TestTheProxyAsksTheDeciderWithTheFetchsOwnContext`
+   in `internal/backend`. Scenarios in `features/subresources.feature`.)*
 
 2. **The backend is an adapter and the adapter is the product.** A backend that
    cannot be swapped makes this a browser with extra steps, and ties the whole
@@ -397,6 +410,17 @@ an absent invariant.
     MCP method gone from the server, an env name gone from `main`, an emitted
     event type renamed, `COMPATIBILITY.md` edited by hand, an additive name
     added (must pass), the manifest gone (measured nothing).)*
+
+15. **Every scenario names a test that exists, and every scenario names one at
+    all.** `features/*.feature` is what a reader reads instead of the code,
+    and a scenario bound to nothing is a paragraph; one bound to a renamed
+    test is worse, because it reads as held. Not a BDD runner, the same
+    decision agent-stack-go, vouchryx and tokenfuse made: the binding is a
+    pointer and this checks the pointer both ways.
+    *(gate: `scripts/features-are-bound.sh`, agent-stack-go's copy; four cases
+    in `gates-have-teeth.sh`: a binding renamed to a test that does not exist,
+    a scenario with no binding, a test named in prose which must NOT fire it,
+    and every feature file removed, where it must say it measured nothing)*
 
 ## Decisions that have no gate yet
 
