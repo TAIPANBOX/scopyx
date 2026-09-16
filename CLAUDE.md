@@ -175,7 +175,30 @@ an absent invariant.
    the model does not know it read half a page and reports confidently on the
    half it got. Zero bytes with any failed subresource is an error, not an
    empty page, and a count a backend cannot supply is `null`, never `0`.
-   *(test)*
+
+   The same rule holds for the two arguments that name HOW to look. Until
+   2026-09-16 `extract=screenshot` and `wait_for` were frozen names the
+   `browse` tool accepted and the chromium backend answered neither, so a
+   screenshot request came back as the page's HTML with the fidelity block
+   silent about it. Fixed the same way as the rest of this invariant: a
+   screenshot is returned as base64 PNG, refused rather than truncated when
+   it does not fit `MaxBodyBytes`, because a PNG cut at an arbitrary byte
+   offset cannot be decoded; `wait_for` polls for its selector and, when it
+   never appears, still returns the document with `truncated_by: time`
+   rather than hanging or erroring; and the fidelity block now names which
+   extract kind was requested, so a reader has a field to check the answer
+   against the ask.
+   *(test: `internal/backend/browse_extract_test.go` against a real browser,
+   `TestScreenshotReturnsAPNGBody`,
+   `TestScreenshotOverTheByteBoundIsRefusedRatherThanTruncated`,
+   `TestWaitForReturnsTheElementInsertedAfterLoad`,
+   `TestWaitForOnASelectorThatNeverAppearsReturnsWithinTheBoundWithTimeTruncation`,
+   `TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection`, the last verified
+   by a canary server the injected script would reach if the selector broke
+   out of its string; `TestPassthroughRefusesScreenshotRatherThanReturningHTML`
+   in `internal/backend/passthrough_test.go`; and
+   `TestFidelityNamesTheExtractThatWasRequestedDefaultedToHTML` in
+   `internal/fetch/fetch_test.go`. Scenarios in `features/browse-extract.feature`.)*
 
 6. **Identity comes from an authenticated caller and never from a claim.**
    `AGENT_PASSPORT_ID` may fill a log line, an event's `agent_id` or a display

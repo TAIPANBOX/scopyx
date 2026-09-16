@@ -404,41 +404,41 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		return Result{RedirectTo: hop, FinalURL: req.URL, Subresources: mergeCounts(counted, px)}, nil
 	}
 
+	trunc := decide.Truncation("")
+	if req.WaitFor != "" {
+		trunc = c.waitFor(ctx, conn, sid, req.WaitFor)
+	}
+
+	finalURL := evalString(ctx, conn, sid, "location.href")
+	if finalURL == "" || finalURL == "about:blank" {
+		finalURL = req.URL
+	}
+
+	if req.Extract == "screenshot" {
+		return c.captureScreenshot(ctx, conn, sid, finalURL, trunc, px, snapshot)
+	}
+
+	expr := "document.documentElement ? document.documentElement.outerHTML : ''"
+	if req.Extract == "text" {
+		expr = "document.body ? document.body.innerText : ''"
+	}
 	var eval struct {
 		Result struct {
 			Value string `json:"value"`
 		} `json:"result"`
 	}
-	expr := "document.documentElement ? document.documentElement.outerHTML : ''"
-	if req.Extract == "text" {
-		expr = "document.body ? document.body.innerText : ''"
-	}
 	if err := conn.Call(ctx, sid, "Runtime.evaluate",
 		map[string]any{"expression": expr, "returnByValue": true}, &eval); err != nil {
 		return Result{}, err
 	}
-
 	body := []byte(eval.Result.Value)
-	trunc := decide.Truncation("")
 	if int64(len(body)) > c.MaxBodyBytes {
 		body = body[:c.MaxBodyBytes]
 		trunc = decide.TruncatedByBytes
 	}
 
-	var final struct {
-		Result struct {
-			Value string `json:"value"`
-		} `json:"result"`
-	}
-	_ = conn.Call(ctx, sid, "Runtime.evaluate",
-		map[string]any{"expression": "location.href", "returnByValue": true}, &final)
-	finalURL := final.Result.Value
-	if finalURL == "" || finalURL == "about:blank" {
-		finalURL = req.URL
-	}
-
-	// Taken again rather than reused: the evaluate calls above are round trips
-	// to the browser, and a page's own scripts keep fetching during them.
+	// Taken again rather than reused: the evals above are round trips to the
+	// browser, and a page's own scripts keep fetching during them.
 	_, counted = snapshot()
 
 	return Result{
@@ -448,6 +448,131 @@ func (c *Chromium) drive(ctx context.Context, conn *cdp.Conn, px *browserproxy.P
 		Subresources: mergeCounts(counted, px),
 		TruncatedBy:  trunc,
 	}, nil
+}
+
+// waitForReserve is held back from wait_for's own bound so the extraction that
+// follows it, the location.href read and either the outerHTML/innerText or
+// the screenshot call, keeps a working context instead of one that is already
+// past its deadline.
+//
+// Without this, wait_for's bound WOULD be the whole fetch's remaining
+// timeout, and a selector that never appears would consume every bit of it,
+// leaving the extraction calls after it to fail with a context already done,
+// which is the opposite of what this exists for: the document must still come
+// back.
+const waitForReserve = 2 * time.Second
+
+// waitForMinimum is the floor on the bound itself, so a fetch whose timeout is
+// nearly spent still gets at least a couple of polls rather than a bound of
+// zero that would report time-truncated without ever having asked once.
+const waitForMinimum = 300 * time.Millisecond
+
+// waitForPoll is how often the selector is re-checked.
+const waitForPoll = 100 * time.Millisecond
+
+// waitFor polls document.querySelector(selector) until it is non-null or its
+// own bound elapses, and returns the truncation to report: none if the
+// selector appeared, time if the bound ran out first.
+//
+// It never returns an error for a selector that merely did not appear: a
+// caller who asked to wait for something that never shows up still gets the
+// document, which is invariant 5's shape applied to this one argument. The
+// selector is caller input and goes into the evaluated expression as a JSON
+// string literal, never by concatenation, so a selector holding a quote and a
+// closing parenthesis cannot break out of the querySelector(...) call it sits
+// inside; see TestWaitForSelectorWithAQuoteAndParenIsNotAnInjection.
+func (c *Chromium) waitFor(ctx context.Context, conn *cdp.Conn, sid, selector string) decide.Truncation {
+	bound := waitForMinimum
+	if dl, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(dl) - waitForReserve; remaining > bound {
+			bound = remaining
+		}
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+
+	selJSON, err := json.Marshal(selector)
+	if err != nil {
+		// Every Go string marshals to JSON; this is unreachable in practice
+		// and guarded rather than ignored because a silent skip here would be
+		// a wait_for that was accepted and quietly never waited on.
+		return decide.TruncatedByTime
+	}
+	expr := "document.querySelector(" + string(selJSON) + ") !== null"
+
+	ticker := time.NewTicker(waitForPoll)
+	defer ticker.Stop()
+	for {
+		var found struct {
+			Result struct {
+				Value bool `json:"value"`
+			} `json:"result"`
+		}
+		if err := conn.Call(ctx, sid, "Runtime.evaluate",
+			map[string]any{"expression": expr, "returnByValue": true}, &found); err == nil && found.Result.Value {
+			return decide.TruncatedNone
+		}
+		select {
+		case <-ticker.C:
+			continue
+		case <-waitCtx.Done():
+			return decide.TruncatedByTime
+		}
+	}
+}
+
+// captureScreenshot renders the page as a PNG and returns it base64-encoded,
+// the body extraction for extract=screenshot.
+//
+// Bounded by MaxBodyBytes like the other extracts, but refused rather than
+// truncated when it does not fit: a PNG cut at an arbitrary byte offset is
+// not a smaller picture, it is bytes that fail to decode, so handing one back
+// would be a truncation flag standing in for an unusable file. Refusing
+// loudly names the actual bound (raise SCOPYX_MAX_BYTES, or ask for text or
+// html instead) rather than returning something that only looks like an
+// answer.
+func (c *Chromium) captureScreenshot(ctx context.Context, conn *cdp.Conn, sid, finalURL string,
+	trunc decide.Truncation, px *browserproxy.Proxy, snapshot func() (string, []Subresource)) (Result, error) {
+	var shot struct {
+		Data string `json:"data"`
+	}
+	if err := conn.Call(ctx, sid, "Page.captureScreenshot",
+		map[string]any{"format": "png"}, &shot); err != nil {
+		return Result{}, fmt.Errorf("scopyx: the screenshot could not be captured: %w", err)
+	}
+	body := []byte(shot.Data)
+	if int64(len(body)) > c.MaxBodyBytes {
+		return Result{}, fmt.Errorf("scopyx: the screenshot is %d bytes of base64 PNG, over the "+
+			"%d byte bound. A screenshot cut at an arbitrary byte offset cannot be decoded, so "+
+			"this is refused rather than returned truncated; raise SCOPYX_MAX_BYTES or fetch as "+
+			"text or html instead", len(body), c.MaxBodyBytes)
+	}
+
+	_, counted := snapshot()
+	return Result{
+		FinalURL:     finalURL,
+		Body:         body,
+		HTTPStatus:   200,
+		Subresources: mergeCounts(counted, px),
+		TruncatedBy:  trunc,
+	}, nil
+}
+
+// evalString runs a JS expression and reads back its string value, empty on
+// any failure. Used only for location.href, exactly as before this change:
+// a failed read falls back to the request URL a few lines down, and that
+// fallback (not an error return) is the existing, unchanged behaviour for
+// this one probe. The body extraction below is deliberately NOT built on
+// this helper, because that call errors the fetch on failure and always has.
+func evalString(ctx context.Context, conn *cdp.Conn, sid, expr string) string {
+	var eval struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	_ = conn.Call(ctx, sid, "Runtime.evaluate",
+		map[string]any{"expression": expr, "returnByValue": true}, &eval)
+	return eval.Result.Value
 }
 
 // mergeCounts reports what the ACCOUNTANT saw, plus anything the FLOOR refused

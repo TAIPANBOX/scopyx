@@ -48,10 +48,23 @@ const (
 // with zero reports perfect fidelity for exactly the backend that can see the
 // least, which is the opposite of what a reader needs.
 type Fidelity struct {
-	Backend      string      `json:"backend"`
-	Enforcement  Enforcement `json:"enforcement"`
-	HTTPStatus   int         `json:"http_status"`
-	ContentBytes int64       `json:"content_bytes"`
+	Backend     string      `json:"backend"`
+	Enforcement Enforcement `json:"enforcement"`
+
+	// Extract names what was asked for: text, html or screenshot, defaulted
+	// to html when the caller left it empty, which is what every backend here
+	// does with an empty request too. Added 2026-09-16 alongside the
+	// screenshot and wait_for fix, because until then a screenshot request
+	// answered with HTML and nothing in this block said so: a reader had no
+	// field to check the answer against the ask. It names what was
+	// REQUESTED, not a per-backend guarantee about how faithfully it was
+	// honoured; passthrough, for instance, returns the same raw bytes
+	// whatever this says, which is a fact about passthrough and not a gap
+	// this field claims to close.
+	Extract string `json:"extract"`
+
+	HTTPStatus   int   `json:"http_status"`
+	ContentBytes int64 `json:"content_bytes"`
 
 	SubresourcesRequested       *int `json:"subresources_requested"`
 	SubresourcesOK              *int `json:"subresources_ok"`

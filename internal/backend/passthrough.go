@@ -32,6 +32,13 @@ import (
 // rendering backend, and the fidelity block says which one answered so a reader
 // is never guessing.
 //
+// It cannot take a screenshot and refuses extract=screenshot rather than
+// silently handing back HTML for it (fixed 2026-09-16; see Fetch). It also
+// does not honour wait_for: with nothing rendered there is no DOM for a
+// selector to ever appear in, so the argument is accepted and quietly not
+// waited on rather than refused, the same way an unsupported optional
+// argument is treated elsewhere in this backend.
+//
 // # IT DOES NOT FOLLOW REDIRECTS, AND THAT IS THE POINT
 //
 // `CheckRedirect` returns `http.ErrUseLastResponse`, so a 302 comes back as a
@@ -92,6 +99,18 @@ func (p *Passthrough) Enforcement() decide.Enforcement { return decide.Enforceme
 
 // Fetch performs one already-decided request.
 func (p *Passthrough) Fetch(ctx context.Context, req Request) (Result, error) {
+	// Refused before the request is even built. This backend makes one HTTP
+	// call and renders nothing, so there is no page to screenshot; returning
+	// the raw HTML it does fetch would be exactly the invariant-5 failure this
+	// repository exists to refuse, a caller asking for one thing and silently
+	// getting another. Fixed 2026-09-16: this used to fall through and answer
+	// with the page's HTML.
+	if req.Extract == "screenshot" {
+		return Result{}, fmt.Errorf("%s cannot take a screenshot: it makes one HTTP request and "+
+			"renders nothing, so there is no rendered page to capture. Use SCOPYX_BACKEND=chromium "+
+			"for extract=screenshot", p.Name())
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("building the request for %s: %w", p.Name(), err)

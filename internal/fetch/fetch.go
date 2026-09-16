@@ -175,7 +175,7 @@ func Do(ctx context.Context, d Deps, req backend.Request) (Result, error) {
 				// by an empty list.
 				res.Redirects = hops
 			}
-			f := fidelityFor(d.Backend, res)
+			f := fidelityFor(d.Backend, res, current.Extract)
 			if err := f.Check(); err != nil {
 				return Result{}, err
 			}
@@ -227,10 +227,14 @@ const absoluteMaxRedirects = 32
 // concludes the page asked for nothing and everything succeeded. That is the
 // silent-zero failure this estate keeps finding, and it would have been
 // written here by anybody not looking for it.
-func fidelityFor(b backend.Backend, res backend.Result) decide.Fidelity {
+func fidelityFor(b backend.Backend, res backend.Result, extract string) decide.Fidelity {
+	if extract == "" {
+		extract = "html"
+	}
 	f := decide.Fidelity{
 		Backend:      b.Name(),
 		Enforcement:  b.Enforcement(),
+		Extract:      extract,
 		HTTPStatus:   res.HTTPStatus,
 		ContentBytes: int64(len(res.Body)),
 		RedirectHops: len(res.Redirects),
