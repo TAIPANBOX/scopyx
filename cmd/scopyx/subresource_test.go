@@ -222,6 +222,14 @@ func TestASubresourceThePolicyPlaneRefusesNeverReachesItsServer(t *testing.T) {
 		"203.0.113.3": strings.TrimPrefix(denied.URL, "http://"),
 	}
 
+	// The browser's profile directory goes under a temp dir of this test's
+	// own. `go test ./...` runs packages in parallel, and internal/backend's
+	// TestTheProfileIsFreshPerFetchAndRemovedAfter counts scopyx-profile-*
+	// directories in the shared temp dir before and after a fetch; a profile
+	// this test's browser holds open at that moment reads there as one that
+	// outlived a fetch. Seen on CI the day this test was added.
+	t.Setenv("TMPDIR", t.TempDir())
+
 	ch, err := backend.NewChromium(exe, 1<<20, 40*time.Second)
 	if err != nil {
 		t.Fatal(err)
