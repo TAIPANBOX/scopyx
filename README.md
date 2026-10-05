@@ -36,7 +36,7 @@ fetcher you already use, and adds the four things that were missing.
 If a change would make the fetch better rather than the fetch more *governed*,
 it belongs in a backend somebody else maintains.
 
-<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 168 on 2026-08-20 -->
+<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 213 on 2026-10-05 -->
 
 <div align="center">
 
@@ -139,6 +139,7 @@ with no subject, and is refused with a reason saying exactly that.
 | `SCOPYX_BACKEND` | `passthrough` | `passthrough`, `external` or `chromium` |
 | `SCOPYX_EXTERNAL_ENDPOINT` | none | your own fetching service, for `external` |
 | `SCOPYX_EXTERNAL_KEY` | none | your credential for your own service |
+| `SCOPYX_EXTERNAL_LABEL` | `service` | the label in the backend's name, `external:<label>` |
 | `SCOPYX_CHROMIUM` | found on PATH | path to the browser, for `chromium` |
 | `SCOPYX_CHROMIUM_NO_SANDBOX` | unset | turns off the browser's own sandbox, see below |
 | `SCOPYX_EVENTS` | none (no record) | path to this plane's own journal |
@@ -146,6 +147,7 @@ with no subject, and is refused with a reason saying exactly that.
 | `SCOPYX_MAX_BYTES` | 32 MiB | body cap |
 | `SCOPYX_MAX_REDIRECTS` | 10 | redirect depth |
 | `SCOPYX_MAX_FETCHES_PER_HOUR` | 500 | `0` disables the cap, and startup says so |
+| `SCOPYX_ROBOTS` | `report` | `report`, `strict` or `off`: `strict` refuses on an unreadable `robots.txt`, `off` does not ask, see below |
 | `SCOPYX_ALLOW_OPEN_BIND` | unset | see below |
 
 ### It refuses to start bound wide with no credentials
@@ -212,12 +214,12 @@ rather than at the first fetch with a message about the network.
 
 | tag | what is in it | you download | on disk |
 |---|---|---|---|
-| `ghcr.io/taipanbox/scopyx:v0.1.2` | the service, distroless, non-root | **3.5 MB** | 15.4 MB |
-| `ghcr.io/taipanbox/scopyx:v0.1.2-chromium` | the same service plus Chromium | **267 MB** | 1.03 GB |
+| `ghcr.io/taipanbox/scopyx:v1.0.1` | the service, distroless, non-root | **3.5 MB** | 15.4 MB |
+| `ghcr.io/taipanbox/scopyx:v1.0.1-chromium` | the same service plus Chromium | **267 MB** | 1.03 GB |
 
 Two numbers because they answer different questions, and stating only one is
 how a size claim misleads. The transfer is what a node pulls; the disk figure
-is what it then keeps. Measured 2026-08-10, the first with `k3s ctr images ls`
+is what it then keeps. Measured 2026-08-10 on v0.1.2, the first with `k3s ctr images ls`
 on an EC2 node and the second with `docker image ls`.
 
 Seventy-six times the transfer is the reason the browser is a separate tag
