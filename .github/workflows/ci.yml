@@ -29,7 +29,7 @@ jobs:
           # Matches `toolchain` in go.mod. These two disagreeing is not
           # cosmetic: setup-go pins GOTOOLCHAIN=local, so a mismatch stops
           # being a silent extra download and becomes a hard failure.
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache: true
 
       - name: gofmt
@@ -39,6 +39,11 @@ jobs:
         run: go vet ./...
 
       - name: staticcheck
+        # dominikh/go-tools#1832: staticcheck 2026.2.1 cannot read the export
+        # data go1.27.2 writes. Lint under go1.27.1 until a fixed release ships;
+        # build, test and govulncheck stay on go1.27.2.
+        env:
+          GOTOOLCHAIN: go1.27.1
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
           staticcheck ./...
@@ -155,7 +160,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           cache: true
       - name: govulncheck
         run: |
