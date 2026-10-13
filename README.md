@@ -10,7 +10,7 @@
 ![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
-<img src="assets/diagram.svg" alt="Five gates in order: a scheme we allow, a host you permit, every address the name resolves to, your policy plane and last the site's own robots.txt. The first three are answered without leaving the process, so a refusal there costs no socket and no packet; a destination your policy refuses is never contacted at all, and a 302 is returned rather than followed because a redirect is a destination nobody named" width="960">
+<img src="assets/diagram.svg" alt="Five gates in order: a scheme we allow, a host you permit, every address the name resolves to, your policy plane and last the site's own robots.txt. The first two are answered without leaving the process. The third needs a DNS lookup before the decision, but a refusal there never opens a connection to the destination; a destination your policy refuses is never contacted at all, and a redirect is decided before it is followed, one hop at a time, because a redirect is a destination nobody named" width="960">
 
 <sub>The same argument on <a href="https://it-rat.com/services/scopyx.html">it-rat.com</a>, where you can pick which request to send and watch where it stops.</sub>
 
@@ -191,6 +191,9 @@ which of the two guarantees was in force, and never claims the stronger one.
 so a document assembled in the browser arrives assembled, and it is the only
 backend for which `per_request` is a measurement rather than a definition:
 `passthrough` is per-request because it makes exactly one request.
+
+The figures in this section were measured on 2026-08-10. Their record is kept
+outside this repository, so no command here reproduces them.
 
 How many other requests a page makes, measured through this backend on an EC2
 node on 2026-08-10, every one of them decided:
@@ -401,10 +404,6 @@ compliant" or "GDPR compliant". There is no certification and no auditor behind
 those words, and a claim nobody can hold is worse than no claim, because a
 reader trusts the whole document on the strength of it.
 
-## Licence
-
-Apache-2.0.
-
 ## Status
 
 - [x] Five gates in one fixed order, and every answer names the gate that stopped it
@@ -412,7 +411,7 @@ Apache-2.0.
 - [x] Origins recorded, never the path or the query string
 - [x] Identity comes from the credential, and the tool takes a URL and never a header
 - [x] Runs standalone, with no other plane required
-- [ ] A browser is out of scope, on purpose: this decides, it does not fetch
+- [x] Not a browser: it decides and records, and renders a page only in the optional chromium backend
 
 ## Licence
 
