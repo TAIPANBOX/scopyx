@@ -302,7 +302,7 @@ an absent invariant.
    refused rather than decided on a claimed one. *(test)*
 
 7. **This plane fails CLOSED when the policy plane cannot answer.**
-   `@yurii 2026-08-09`, "fail-closed так".
+   `@decided 2026-08-09`: fail closed, not open, when the policy plane cannot answer.
 
    It is a deliberate divergence from the rest of the estate and the divergence
    is the point. TokenFuse's LLM path fails open and documents it honestly,
