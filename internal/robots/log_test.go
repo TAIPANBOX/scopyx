@@ -106,3 +106,13 @@ func TestOffWritesNoDecisionLine(t *testing.T) {
 		t.Errorf("robots off wrote a decision line:\n%s", buf.String())
 	}
 }
+
+// The log names the mode with the word the operator wrote in SCOPYX_ROBOTS, so
+// a line and the setting say the same thing.
+func TestTheLoggedModeIsTheSettingWordTheOperatorWrote(t *testing.T) {
+	for m, want := range map[Mode]string{ModeReport: "report", ModeStrict: "strict", ModeOff: "off"} {
+		if got := m.String(); got != want {
+			t.Errorf("mode %d logs as %q, want %q", int(m), got, want)
+		}
+	}
+}
