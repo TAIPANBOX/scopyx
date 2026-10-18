@@ -332,14 +332,16 @@ an absent invariant.
    obeyed, per RFC 9309, including group boundaries, longest-match precedence,
    Allow beating Disallow at equal length, and the two wildcards.
 
-   **An unreadable robots.txt ALLOWS and says so, which is not the crawler
+   **An unreadable robots.txt ALLOWS and writes the decision down, which is not the crawler
    posture and is deliberate.** Crawler guidance treats a 5xx as a complete
    disallow, which is right when you are about to make ten thousand requests
    and wrong here: it would let a site's transient error stop an operator's own
    governed work, and hand any origin a way to deny service to the agents
-   fetching it. The result carries `Read: false` so nothing downstream can
-   report it as permission. `SCOPYX_ROBOTS=strict` gets the crawler behaviour
-   for an operator who wants it.
+   fetching it. The reading carries `Read: false`, but the fetch does not hand
+   that to the caller, so each decision made without a readable robots.txt is
+   logged for its destination (`Cache.Log`: the origin and the outcome, never a
+   path). `SCOPYX_ROBOTS=strict` gets the crawler behaviour for an operator who
+   wants it.
 
    The site's preference is asked AFTER the operator's policy, so a
    destination the policy refuses is never contacted at all, not even for its
@@ -348,7 +350,13 @@ an absent invariant.
    `cmd/scopyx/main_test.go`, all verified by breaking the implementation: the
    group boundary removed, first-match instead of longest-match, an empty
    Disallow read as a match on everything, `$` not anchoring, a 5xx read as a
-   reading, and the cache never expiring)*
+   reading, and the cache never expiring; for the log, the line removed, and a
+   path written into it, both caught by `internal/robots`'s
+   `TestAnUnreadableRobotsIsLoggedForEachDestinationWhenAllowed`,
+   `TestEachFetchToAnUnreadableSiteIsLoggedNotOnlyTheFirst`,
+   `TestAnUnreadableRobotsIsLoggedWhenStrictRefuses`,
+   `TestAReadableRobotsWritesNoDecisionLine` and `TestOffWritesNoDecisionLine`;
+   scenarios in `features/robots-unreadable.feature`, five)*
 
    Two of those are positioning and two are law-shaped. The estate is defensive
    tooling for an operator governing their own agents, and a component that
