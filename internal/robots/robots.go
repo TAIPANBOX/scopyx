@@ -22,7 +22,8 @@
 // would let a site's transient error stop an operator's own governed work, and
 // hand any origin a way to deny service to the agents fetching it.
 //
-// So an unreadable robots.txt ALLOWS, and the result says it could not be read.
+// So an unreadable robots.txt ALLOWS, and each such decision is logged for its
+// destination, since the caller is never handed the caveat.
 // That is the estate's rule about silent zeroes applied to somebody else's
 // server: "could not look" is a reportable state, never an answer. An operator
 // who wants the crawler posture sets SCOPYX_ROBOTS=strict and gets a refusal
@@ -32,6 +33,7 @@ package robots
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -56,6 +58,19 @@ const (
 	// ModeOff does not fetch robots.txt at all.
 	ModeOff
 )
+
+// String is the SCOPYX_ROBOTS value this mode is set by, so a log line and the
+// setting an operator wrote say the same word.
+func (m Mode) String() string {
+	switch m {
+	case ModeStrict:
+		return "strict"
+	case ModeOff:
+		return "off"
+	default:
+		return "report"
+	}
+}
 
 // Result is what one lookup produced.
 type Result struct {
@@ -88,6 +103,11 @@ type Cache struct {
 	Mode Mode
 	TTL  time.Duration
 	HTTP *http.Client
+
+	// Log, when set, receives one line for each decision made without a readable
+	// robots.txt: the origin, the mode and the outcome. It never receives a path
+	// or a query (invariant 10). Nil writes nothing.
+	Log *slog.Logger
 }
 
 type entry struct {
@@ -140,6 +160,7 @@ func (c *Cache) Check(ctx context.Context, scheme, host, path string) Result {
 	g, read := c.groupFor(ctx, scheme, host)
 	if !read {
 		if c.Mode == ModeStrict {
+			c.logDecision(scheme, host, "refused")
 			return Result{
 				Allowed: false,
 				Read:    false,
@@ -147,6 +168,7 @@ func (c *Cache) Check(ctx context.Context, scheme, host, path string) Result {
 					"deployment is configured to refuse rather than assume permission",
 			}
 		}
+		c.logDecision(scheme, host, "allowed")
 		return Result{
 			Allowed: true,
 			Read:    false,
@@ -164,6 +186,17 @@ func (c *Cache) Check(ctx context.Context, scheme, host, path string) Result {
 		}
 	}
 	return Result{Allowed: true, Read: true}
+}
+
+// logDecision writes the decision made for one destination without a readable
+// robots.txt. The origin is named and the path is not: a path is part of the
+// URL, and a URL is personal data.
+func (c *Cache) logDecision(scheme, host, decision string) {
+	if c.Log == nil {
+		return
+	}
+	c.Log.Warn("robots.txt could not be read for this destination",
+		"origin", scheme+"://"+host, "mode", c.Mode.String(), "decision", decision)
 }
 
 func (c *Cache) groupFor(ctx context.Context, scheme, host string) (group, bool) {

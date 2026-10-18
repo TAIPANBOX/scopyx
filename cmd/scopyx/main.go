@@ -136,10 +136,10 @@ func run(log *slog.Logger) error {
 	// stated wishes is the cheapest kind of supplying it.
 	//
 	// `report` is the default and NOT the crawler posture: an unreadable
-	// robots.txt allows and says it could not be read, because letting a
-	// site's 500 stop an operator's own governed work hands any origin a way
-	// to deny service to the agents fetching it. `strict` is there for an
-	// operator who wants the crawler behaviour.
+	// robots.txt allows, and each such decision is logged for its destination.
+	// Letting a site's 500 stop an operator's own governed work would hand any
+	// origin a way to deny service to the agents fetching it. `strict` is there
+	// for an operator who wants the crawler behaviour.
 	var robotsMode robots.Mode
 	switch v := env("SCOPYX_ROBOTS", "report"); v {
 	case "report":
@@ -155,6 +155,10 @@ func run(log *slog.Logger) error {
 	}
 
 	perHour := envInt("SCOPYX_MAX_FETCHES_PER_HOUR", defaultFetchesPerHour)
+	// The decision made without a readable robots.txt goes to this log, one line
+	// per destination, because the fetch never hands the caveat to its caller.
+	robotsCache := robots.New(robotsMode, 0, pinned)
+	robotsCache.Log = log
 	g := &governed{
 		log:     log,
 		backend: back,
@@ -176,7 +180,7 @@ func run(log *slog.Logger) error {
 		// checks seeing it. `internal/pin` makes the dialer refuse any host the
 		// context does not carry, so this client cannot reach anywhere
 		// `internal/fetch` has not already resolved and decided about.
-		robots: robots.New(robotsMode, 0, pinned),
+		robots: robotsCache,
 	}
 
 	srv := &http.Server{
