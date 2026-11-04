@@ -36,7 +36,7 @@ fetcher you already use, and adds the four things that were missing.
 If a change would make the fetch better rather than the fetch more *governed*,
 it belongs in a backend somebody else maintains.
 
-<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 213 on 2026-10-05 -->
+<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 234 on 2026-11-04 -->
 
 <div align="center">
 
@@ -59,6 +59,8 @@ leads outside.
 ```mermaid
 flowchart LR
   Agent["AI agent (any framework)"] -->|"fetch_url over MCP"| SX["scopyx: the egress plane"]
+  Agent -.->|"or through the broker"| BRK["TokenFuse MCP broker: holds the scopyx key"]
+  BRK -->|"last hop"| SX
   SX -->|"POST /v1/decide (PEP)"| WX["Wardryx: policy PDP"]
   WX -.->|"allow / deny"| SX
   SX -->|"only what was decided"| WEB[("the open web")]
