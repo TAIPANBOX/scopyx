@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -53,7 +55,15 @@ type Server struct {
 	// RunID labels this process's fetches in the record. One per process,
 	// because a run is a thing an operator restarts.
 	RunID string
+
+	// AcceptKeyInMeta lets a `tools/call` carry its credential at
+	// `params._meta[MetaKeyName]` (SCOPYX_ACCEPT_KEY_IN_META). Off by default,
+	// and then the door is exactly what it was: the header, before the body.
+	AcceptKeyInMeta bool
 }
+
+// maxRequestBytes bounds one JSON-RPC request.
+const maxRequestBytes = 1 << 20
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -92,15 +102,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The door first, before the body is even parsed. A caller that cannot
 	// present a credential must not be able to reach the parser, let alone the
-	// tool dispatch.
+	// tool dispatch. The one exception is an operator who said the credential may
+	// travel in the body, and it is the door reading the body, not the dispatch.
 	key := r.Header.Get(ClientKeyHeader)
-	if !s.Keys.Allow(key) {
+	open := false
+	if s.AcceptKeyInMeta {
+		key, open = doorFromBody(w, r, key)
+	}
+	if !open && !s.Keys.Allow(key) {
 		http.Error(w, "a client credential is required in "+ClientKeyHeader, http.StatusUnauthorized)
 		return
 	}
 
 	var req rpcRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes)).Decode(&req); err != nil {
 		writeRPC(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{codeParse, "the request could not be parsed: " + err.Error()}})
 		return
 	}
@@ -128,6 +143,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID,
 			Error: &rpcError{codeMethodNotFound, "unknown method " + req.Method}})
 	}
+}
+
+// doorFromBody is the door when SCOPYX_ACCEPT_KEY_IN_META is on. It returns the
+// credential to judge and whether this message needs none, and leaves r.Body holding
+// the request with the credential removed, so the dispatch below reads a body that
+// never carried one.
+//
+// The header wins when both are sent, because a header is what the plain door has
+// always meant, and the entry is removed either way. A body that cannot be read
+// carries no credential and is judged as carrying none: the caller is told what the
+// door says, and a body over the bound learns nothing about the parser.
+func doorFromBody(w http.ResponseWriter, r *http.Request, header string) (key string, open bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	if err != nil {
+		body = nil
+	}
+	metaKey, stripped, found := extractMetaKey(body)
+	r.Body = io.NopCloser(bytes.NewReader(stripped))
+	if header != "" {
+		return header, false
+	}
+	if found {
+		return metaKey, false
+	}
+	return "", needsNoCredential(stripped)
 }
 
 type callParams struct {

@@ -64,6 +64,7 @@ go build ./...
 ./scripts/no-compliance-claims.sh
 ./scripts/compat-surface.sh      # invariant 14; compat/1.0.json against the code, COMPATIBILITY.md rendered
 ./scripts/features-are-bound.sh  # invariant 15; every scenario in features/ names a test that exists
+./scripts/meta-key-stops-at-the-door.sh  # invariant 16; the door's key in the body stops at the door
 ./scripts/gates-have-teeth.sh   # needs a clean tree, run it after committing
 ```
 
@@ -544,6 +545,10 @@ an absent invariant.
     in `gates-have-teeth.sh`: a binding renamed to a test that does not exist,
     a scenario with no binding, a test named in prose which must NOT fire it,
     and every feature file removed, where it must say it measured nothing)*
+
+16. **The door's credential may travel in the body only when an operator says so, it stops at the door, and a fetch always needs one.** The TokenFuse MCP broker forwards a call with nothing of the caller's, so a plane behind it never sees `X-Scopyx-Key`, and an agent that holds the key can go round the broker. `@decided 2026-11-04`, paraphrased: this plane takes its key through the broker, so the broker can put the run's label on the act rather than on a name the agent reported. `SCOPYX_ACCEPT_KEY_IN_META=1` lets a `tools/call` carry the credential at `params._meta["scopyx/key"]`, the shape typryx took for the same broker: the agent writes a `{{secret:NAME}}` handle, the broker fills it in on the last hop, and the agent never holds the key. It is this door's credential and nothing else, so invariant 3 is unchanged, and it resolves to its agent exactly as the header does, so invariant 6 is too. Off by default, and then the door is the header, before the body, as before.
+
+With the flag on the door has to read the body, so the sentence above about refusing before the parser no longer holds for that deployment, and the cost is named: anything reaching the port can make this process read and parse up to 1 MiB. The entry is removed at the door whether or not it is the credential used. The header wins when both are sent. `initialize`, `tools/list` and `notifications/initialized` need no credential, because the broker forwards them bare and they fetch nothing. That list goes by method and never by the absence of an id: this server dispatches on the method alone, so a `tools/call` with no id still fetches. `@claude 2026-11-04`, under delegated authority, open to reversal: typryx reads a missing id as a notification and this plane deliberately does not; a body that cannot be read or parsed is judged as carrying no credential. *(gate: `scripts/meta-key-stops-at-the-door.sh`, the entry's name nowhere outside `internal/mcp/meta.go`, the door before the decode, and `tools/call` nowhere in the list that needs no credential; test: `internal/mcp/meta_test.go`; scenarios: `features/key-through-the-broker.feature`, each bound)*
 
 ## Decisions that have no gate yet
 

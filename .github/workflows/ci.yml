@@ -104,6 +104,9 @@ jobs:
       - name: every scenario names a test that exists
         run: ./scripts/features-are-bound.sh
 
+      - name: the door's key in the body stops at the door
+        run: ./scripts/meta-key-stops-at-the-door.sh
+
       # Last, because it mutates tracked files and restores them. It needs a
       # clean tree and says so plainly, so it also reports any earlier step
       # that started writing into the checkout.

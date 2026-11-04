@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml/badge.svg)](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/go-1.27-00ADD8.svg)
-![tests](https://img.shields.io/badge/tests-219-brightgreen.svg)
+![tests](https://img.shields.io/badge/tests-234-brightgreen.svg)
 ![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
@@ -149,6 +149,7 @@ with no subject, and is refused with a reason saying exactly that.
 | `SCOPYX_MAX_FETCHES_PER_HOUR` | 500 | `0` disables the cap, and startup says so |
 | `SCOPYX_ROBOTS` | `report` | `report`, `strict` or `off`: `strict` refuses on an unreadable `robots.txt`, `off` does not ask, see below |
 | `SCOPYX_ALLOW_OPEN_BIND` | unset | see below |
+| `SCOPYX_ACCEPT_KEY_IN_META` | unset | `1` reads a `tools/call` credential from `params._meta`, for the broker, see below |
 
 ### It refuses to start bound wide with no credentials
 
@@ -393,6 +394,32 @@ that owns a single privilege and is separate *because* of it.
 The TokenFuse MCP broker in front of it adds things when present and is not a
 precondition, and that standalone path is covered by tests rather than by this
 sentence.
+
+### Behind the TokenFuse MCP broker
+
+The broker forwards a call with nothing of the caller's, so `X-Scopyx-Key` does not
+arrive. Set `SCOPYX_ACCEPT_KEY_IN_META=1` and a `tools/call` may carry its credential
+at `params._meta["scopyx/key"]`, written there as `{{secret:scopyx_key}}` and filled
+in by the broker from its own vault on the last hop:
+
+```json
+{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+  "name": "fetch_url",
+  "arguments": {"url": "https://example.com"},
+  "_meta": {"scopyx/key": "{{secret:scopyx_key}}"}
+}}
+```
+
+The agent holds a handle and never the key, so it has no way to reach this plane
+except through the broker. That is what lets the broker label the run from the act
+rather than from a name the agent reported. The key resolves to its agent exactly as
+the header does, and the entry is removed at the door, so nothing past it sees it.
+
+With the flag on, `initialize`, `tools/list` and `notifications/initialized` need no
+credential, because the broker sends them bare and they fetch nothing; `tools/call`
+always needs one. The door reads the body to find it, so it reads up to 1 MiB from
+whoever reaches the port: keep the port on a network only the broker reaches. Off,
+which is the default, the door is the header and nothing else.
 
 ## Regulatory position
 

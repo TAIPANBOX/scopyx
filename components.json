@@ -41,6 +41,9 @@
         "package": "github.com/TAIPANBOX/scopyx/cmd/scopyx",
         "listen_default": "127.0.0.1:4300",
         "env": {
+          "SCOPYX_ACCEPT_KEY_IN_META": {
+            "required": false
+          },
           "SCOPYX_ADDR": {
             "required": false,
             "default": "127.0.0.1:4300"

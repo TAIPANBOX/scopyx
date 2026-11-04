@@ -89,6 +89,7 @@ Status: frozen at 1.0.0 (2026-09-13): the surface below is the promise of this m
 
 - the chromium backend's CDP details (SCOPYX_CHROMIUM, SCOPYX_CHROMIUM_NO_SANDBOX): the browser it drives and how it finds it
 - the external backend's request shape (SCOPYX_EXTERNAL_*)
+- the door's credential at params._meta["scopyx/key"] behind the TokenFuse MCP broker (SCOPYX_ACCEPT_KEY_IN_META): new, so the shape may still move
 
 ## Support
 
