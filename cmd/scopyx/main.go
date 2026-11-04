@@ -183,9 +183,16 @@ func run(log *slog.Logger) error {
 		robots: robotsCache,
 	}
 
+	// Off unless an operator puts the TokenFuse MCP broker in front of this plane
+	// (internal/mcp/meta.go). Said at startup because it moves where the door reads.
+	acceptKeyInMeta := mcp.TruthyEnv(os.Getenv("SCOPYX_ACCEPT_KEY_IN_META"))
+	if acceptKeyInMeta {
+		log.Info("the door also reads a tools/call credential from params._meta", "entry", mcp.MetaKeyName)
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           &mcp.Server{Keys: keys, Fetcher: g, RunID: runID()},
+		Handler:           &mcp.Server{Keys: keys, Fetcher: g, RunID: runID(), AcceptKeyInMeta: acceptKeyInMeta},
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

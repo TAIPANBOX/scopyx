@@ -234,6 +234,33 @@ run_case "features-are-bound: a scenario with no binding at all" fail \
 	"$(py 'edit("features/subresources.feature", "  Scenario: One question per host, not one per request", "  Scenario: Something nobody bound\n    Given a paragraph\n\n  Scenario: One question per host, not one per request")')" \
 	"binding(s)"
 
+# Invariant 16. The door's key in the body is the one place a credential comes
+# through a message, so where it may be read and who may skip it are held here.
+run_case "meta-key: tools/call needs no credential" fail \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'edit("internal/mcp/meta.go", "case \"initialize\", \"tools/list\", \"notifications/initialized\":", "case \"initialize\", \"tools/list\", \"notifications/initialized\", \"tools/call\":")')" \
+	"needs no credential"
+
+run_case "meta-key: a missing id read as a notification" fail \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'edit("internal/mcp/meta.go", "	switch req.Method {", "	if len(req.ID) == 0 {\n		return true\n	}\n	switch req.Method {")')" \
+	"absence of an id"
+
+run_case "meta-key: the entry named outside the door" fail \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'edit("internal/record/record.go", "package record", "package record\n\nconst leaked = \"scopyx/key\"")')" \
+	"outside internal/mcp/meta.go"
+
+run_case "meta-key: the dispatch reads the body before the door" fail \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'edit("internal/mcp/server.go", "	key := r.Header.Get(ClientKeyHeader)\n	open := false\n", "	_ = json.NewDecoder(r.Body)\n	key := r.Header.Get(ClientKeyHeader)\n	open := false\n")')" \
+	"before the door"
+
+run_case "meta-key: the door gone, so the gate measured nothing" fail \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'import os; os.remove("internal/mcp/meta.go")')" \
+	"measured nothing"
+
 echo
 echo "=== and what they must NOT catch ==="
 
@@ -252,6 +279,11 @@ run_case "one-way-out: a transport in a TEST file" pass \
 	'./scripts/one-way-out.sh' \
 	"$(py 's = open("internal/record/record_test.go").read()
 open("internal/record/record_test.go","w").write(s + "\n\n// fixtures may open what they need\n")')"
+
+# The entry named in a comment names nothing that runs.
+run_case "meta-key: a comment that names the entry" pass \
+	'./scripts/meta-key-stops-at-the-door.sh' \
+	"$(py 'edit("internal/record/record.go", "package record", "// scopyx/key never reaches this package.\npackage record")')"
 
 # Prose naming a forbidden construct is not the construct. These gates read
 # code with the comments stripped, and this repository's comments discuss

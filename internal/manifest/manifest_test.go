@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -352,6 +353,52 @@ func TestItRefusesAnOpenBindWithNoCredentialAndOnlyThat(t *testing.T) {
 		case !row.mustStart && code != ob.ExitCode:
 			t.Errorf("%s: it refused with exit %d; components.json says %d",
 				row.name, code, ob.ExitCode)
+		}
+	}
+}
+
+// A flag read into a local and never handed to the server compiles and passes every
+// test in internal/mcp, which construct the server themselves.
+func TestTheBinaryReadsTheKeyInMetaSwitch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts processes")
+	}
+	m, r := load(t)
+	c := service(t, m)
+	bin := build(t, r, c.Checked.Package)
+
+	for _, row := range []struct {
+		name   string
+		extra  []string
+		status int
+	}{
+		{"on", []string{"SCOPYX_ACCEPT_KEY_IN_META=1"}, http.StatusOK},
+		{"off", nil, http.StatusUnauthorized},
+	} {
+		addr := "127.0.0.1:" + freePort(t)
+		cmd := exec.Command(bin)
+		cmd.Env = append([]string{
+			"SCOPYX_WARDRYX=http://127.0.0.1:1/unreachable",
+			"SCOPYX_KEYS=k1=agent://acme.example/reader",
+			"SCOPYX_ADDR=" + addr,
+		}, row.extra...)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+		status := 0
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			resp, err := http.Post("http://"+addr, "application/json",
+				strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+			if err == nil {
+				status = resp.StatusCode
+				_ = resp.Body.Close()
+				break
+			}
+		}
+		if status != row.status {
+			t.Errorf("%s: tools/list with no credential answered %d, want %d", row.name, status, row.status)
 		}
 	}
 }
