@@ -36,7 +36,7 @@ fetcher you already use, and adds the four things that were missing.
 If a change would make the fetch better rather than the fetch more *governed*,
 it belongs in a backend somebody else maintains.
 
-<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 234 on 2026-11-04 -->
+<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 241 on 2026-11-05 -->
 
 <div align="center">
 
