@@ -63,6 +63,8 @@ type harness struct {
 	hits       chan string
 	journal    string
 	robotsBody atomic.Value
+	// pdpRuns is every run_id the policy plane was asked about.
+	pdpRuns chan string
 }
 
 // robots sets what the fixture serves at /robots.txt. Unset is a 404, which is
@@ -91,7 +93,7 @@ func newHarness(t *testing.T, decision string, res interface {
 }) *harness {
 	t.Helper()
 
-	h := &harness{hits: make(chan string, 16)}
+	h := &harness{hits: make(chan string, 16), pdpRuns: make(chan string, 16)}
 
 	h.target = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -111,7 +113,15 @@ func newHarness(t *testing.T, decision string, res interface {
 	}))
 	t.Cleanup(h.target.Close)
 
-	pdp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	pdp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			RunID string `json:"run_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		select {
+		case h.pdpRuns <- asked.RunID:
+		default:
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"decision": decision, "policy_version": "v1", "reason": "fixture policy",
 		})
@@ -168,11 +178,20 @@ func newHarness(t *testing.T, decision string, res interface {
 
 func (h *harness) call(t *testing.T, key, url string) map[string]any {
 	t.Helper()
+	return h.callInRun(t, key, url, "")
+}
+
+// callInRun is call with the run a broker names on its last hop.
+func (h *harness) callInRun(t *testing.T, key, url, run string) map[string]any {
+	t.Helper()
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fetch_url",
 		"arguments":{"url":"` + url + `"}}}`
 	req, _ := http.NewRequest(http.MethodPost, h.mcpSrv.URL, strings.NewReader(body))
 	if key != "" {
 		req.Header.Set(mcp.ClientKeyHeader, key)
+	}
+	if run != "" {
+		req.Header.Set(mcp.RunHeader, run)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -191,6 +210,39 @@ func (h *harness) events(t *testing.T) []event.Event {
 		t.Fatalf("reading the journal: %v", err)
 	}
 	return evs
+}
+
+// The header is only worth anything if the run it names reaches the two places a
+// reader looks for it: the record of the fetch, and the question put to the policy
+// plane. The second fetch on the same process is what the old label could not tell
+// apart.
+func TestARunNamedOnACallReachesTheRecordAndThePolicyPlane(t *testing.T) {
+	h := newHarness(t, "allow", publicResolver{})
+
+	for _, run := range []string{"run-web-1", "run-web-2"} {
+		out := h.callInRun(t, "k1", "http://example.com/report", run)
+		if res, ok := out["result"].(map[string]any); !ok || res["isError"] == true {
+			t.Fatalf("the fetch was refused: %v", out)
+		}
+	}
+
+	evs := h.events(t)
+	if len(evs) != 2 {
+		t.Fatalf("want two events, got %d", len(evs))
+	}
+	for i, want := range []string{"run-web-1", "run-web-2"} {
+		if evs[i].RunID != want {
+			t.Errorf("record %d carries run %q, want %q", i, evs[i].RunID, want)
+		}
+	}
+	close(h.pdpRuns)
+	asked := map[string]bool{}
+	for run := range h.pdpRuns {
+		asked[run] = true
+	}
+	if !asked["run-web-1"] || !asked["run-web-2"] || len(asked) != 2 {
+		t.Errorf("the policy plane was asked about %v", asked)
+	}
 }
 
 // WP6's acceptance: the standalone path is a TESTED path rather than a README

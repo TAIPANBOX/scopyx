@@ -52,8 +52,8 @@ type Server struct {
 	Keys    Keys
 	Fetcher Fetcher
 
-	// RunID labels this process's fetches in the record. One per process,
-	// because a run is a thing an operator restarts.
+	// RunID labels a fetch whose caller named no run: a client on this door with
+	// no broker in front of it. See RunHeader.
 	RunID string
 
 	// AcceptKeyInMeta lets a `tools/call` carry its credential at
@@ -64,6 +64,19 @@ type Server struct {
 
 // maxRequestBytes bounds one JSON-RPC request.
 const maxRequestBytes = 1 << 20
+
+// RunHeader names the run a call belongs to, the same header TokenFuse reads from
+// its own callers. The broker writes it on the last hop, for an upstream the operator
+// classified, so a fetch joins the run that asked for it in this plane's record and in
+// the decision it asks for (invariant 17).
+//
+// A label and not an identity: nothing is admitted on it, and who is calling still
+// comes from the credential alone (invariant 6). A caller holding a key of its own can
+// write any run here, which is what it can do at the gateway too.
+const RunHeader = "X-Fuse-Run-Id"
+
+// maxRunBytes bounds a run's label, since it is copied into every record of the call.
+const maxRunBytes = 256
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -135,7 +148,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": Tools()}})
 	case "tools/call":
-		s.call(r.Context(), w, req, key)
+		s.call(r.Context(), w, req, key, s.runFor(r.Header.Get(RunHeader)))
 	case "notifications/initialized":
 		// A notification carries no id and expects no answer.
 		w.WriteHeader(http.StatusNoContent)
@@ -175,7 +188,24 @@ type callParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-func (s *Server) call(ctx context.Context, w http.ResponseWriter, req rpcRequest, key string) {
+// runFor is the run a call is recorded under: the one it names, or this process's.
+//
+// A header that is not a label falls back rather than refusing the fetch. The call
+// passed the door and the schema, and a bad label is no reason to refuse it; what must
+// not happen is a header writing anything but one bounded word into the record.
+func (s *Server) runFor(header string) string {
+	if header == "" || len(header) > maxRunBytes {
+		return s.RunID
+	}
+	for i := 0; i < len(header); i++ {
+		if header[i] <= ' ' || header[i] >= 0x7f {
+			return s.RunID
+		}
+	}
+	return header
+}
+
+func (s *Server) call(ctx context.Context, w http.ResponseWriter, req rpcRequest, key, run string) {
 	var p callParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID,
@@ -211,7 +241,7 @@ func (s *Server) call(ctx context.Context, w http.ResponseWriter, req rpcRequest
 		WaitFor: str(args["wait_for"]),
 		// From the credential, never from the body. Invariant 6.
 		AgentID: s.Keys.Identity(key),
-		RunID:   s.RunID,
+		RunID:   run,
 	}
 
 	ans, err := s.Fetcher.Fetch(ctx, c)
