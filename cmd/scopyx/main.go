@@ -487,8 +487,9 @@ func capState(perHour int64) string {
 	return strconv.FormatInt(perHour, 10)
 }
 
-// runID labels this process's fetches. One per process, because a run is a
-// thing an operator restarts.
+// runID labels a fetch whose caller named no run. One per process, because the only
+// thing left to say about such a fetch is which process made it. A call through the
+// broker names its own run (mcp.RunHeader).
 func runID() string {
 	return "scopyx-" + strconv.FormatInt(time.Now().UTC().Unix(), 10)
 }

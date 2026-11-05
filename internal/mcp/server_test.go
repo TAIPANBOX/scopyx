@@ -341,3 +341,128 @@ func firstText(t *testing.T, res map[string]any) string {
 	s, _ := first["text"].(string)
 	return s
 }
+
+// fetchWith sends one fetch_url carrying the given headers, and returns the status.
+func fetchWith(t *testing.T, srv *httptest.Server, headers map[string]string, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	return res.StatusCode
+}
+
+const oneFetch = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fetch_url","arguments":{"url":"https://example.org/"}}}`
+
+func TestEachCallCarriesTheRunItNames(t *testing.T) {
+	f := &recordingFetcher{}
+	srv := serve(t, "k=agent://a", f)
+
+	for _, run := range []string{"run-web-7", "run-web-8"} {
+		if got := fetchWith(t, srv, map[string]string{ClientKeyHeader: "k", RunHeader: run}, oneFetch); got != http.StatusOK {
+			t.Fatalf("status %d", got)
+		}
+		if f.last.RunID != run {
+			t.Fatalf("a call naming %q reached the fetcher as %q", run, f.last.RunID)
+		}
+	}
+}
+
+func TestACallThatNamesNoRunKeepsTheProcessRun(t *testing.T) {
+	f := &recordingFetcher{}
+	srv := serve(t, "k=agent://a", f)
+
+	fetchWith(t, srv, map[string]string{ClientKeyHeader: "k"}, oneFetch)
+	if f.last.RunID != "run-1" {
+		t.Fatalf("got %q, want the process's run", f.last.RunID)
+	}
+}
+
+// The deployment this exists for: the broker writes the key into the message and
+// the run into a header, on the same call.
+func TestARunArrivesBesideAKeyInTheMessage(t *testing.T) {
+	f := &recordingFetcher{}
+	srv := httptest.NewServer(&Server{Keys: ParseKeys("k=agent://a"), Fetcher: f, RunID: "run-1", AcceptKeyInMeta: true})
+	t.Cleanup(srv.Close)
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fetch_url","arguments":{"url":"https://example.org/"},"_meta":{"` + MetaKeyName + `":"k"}}}`
+	if got := fetchWith(t, srv, map[string]string{RunHeader: "run-web-9"}, body); got != http.StatusOK {
+		t.Fatalf("status %d", got)
+	}
+	if f.last.RunID != "run-web-9" || f.last.AgentID != "agent://a" {
+		t.Fatalf("got run %q agent %q", f.last.RunID, f.last.AgentID)
+	}
+}
+
+func TestARunHeaderOpensNoDoor(t *testing.T) {
+	f := &recordingFetcher{}
+	srv := serve(t, "k=agent://a", f)
+
+	if got := fetchWith(t, srv, map[string]string{RunHeader: "run-web-7"}, oneFetch); got != http.StatusUnauthorized {
+		t.Fatalf("status %d, want the door's refusal", got)
+	}
+	if f.last.URL != "" {
+		t.Fatalf("a call with a run and no key reached the fetcher: %+v", f.last)
+	}
+}
+
+func TestAHeaderThatIsNoRunLabelIsNotRecorded(t *testing.T) {
+	s := &Server{RunID: "run-1"}
+	for name, header := range map[string]string{
+		"empty":         "",
+		"a space":       "run web",
+		"a newline":     "run\nweb",
+		"a NUL":         "run\x00web",
+		"DEL":           "run\x7fweb",
+		"not ASCII":     "run-вебу",
+		"one byte over": strings.Repeat("r", maxRunBytes+1),
+	} {
+		if got := s.runFor(header); got != "run-1" {
+			t.Errorf("%s: recorded %q", name, got)
+		}
+	}
+	longest := strings.Repeat("r", maxRunBytes)
+	if got := s.runFor(longest); got != longest {
+		t.Errorf("a label of exactly the bound was refused")
+	}
+}
+
+// Hostile bytes, swept: whatever arrives, what is recorded is either the process's
+// run or a label of bounded printable ASCII, so a header cannot write into the journal
+// anything but one word.
+func TestNoHeaderPutsAnUnprintableByteInTheRecord(t *testing.T) {
+	s := &Server{RunID: "run-1"}
+	state := uint64(0x9E3779B97F4A7C15)
+	next := func() uint64 {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		return state
+	}
+	for i := 0; i < 20000; i++ {
+		raw := make([]byte, next()%(maxRunBytes+40))
+		for j := range raw {
+			raw[j] = byte(next())
+		}
+		got := s.runFor(string(raw))
+		if got == "run-1" {
+			continue
+		}
+		if len(got) > maxRunBytes {
+			t.Fatalf("seed step %d: %d bytes recorded", i, len(got))
+		}
+		for j := 0; j < len(got); j++ {
+			if got[j] <= ' ' || got[j] >= 0x7f {
+				t.Fatalf("seed step %d: byte %#x recorded", i, got[j])
+			}
+		}
+	}
+}
