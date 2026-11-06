@@ -83,7 +83,7 @@ docker run --rm \
   -e SCOPYX_EVENTS=/var/lib/scopyx/events.ndjson \
   -v scopyx-events:/var/lib/scopyx \
   -p 4300:4300 \
-  ghcr.io/taipanbox/scopyx:v1.2.0
+  ghcr.io/taipanbox/scopyx:v1.3.0
 ```
 
 Then point an MCP client at `http://localhost:4300` with the header
@@ -220,8 +220,8 @@ rather than at the first fetch with a message about the network.
 
 | tag | what is in it | you download | on disk |
 |---|---|---|---|
-| `ghcr.io/taipanbox/scopyx:v1.2.0` | the service, distroless, non-root | **3.5 MB** | 15.4 MB |
-| `ghcr.io/taipanbox/scopyx:v1.2.0-chromium` | the same service plus Chromium | **267 MB** | 1.03 GB |
+| `ghcr.io/taipanbox/scopyx:v1.3.0` | the service, distroless, non-root | **3.5 MB** | 15.4 MB |
+| `ghcr.io/taipanbox/scopyx:v1.3.0-chromium` | the same service plus Chromium | **267 MB** | 1.03 GB |
 
 Two numbers because they answer different questions, and stating only one is
 how a size claim misleads. The transfer is what a node pulls; the disk figure
@@ -244,10 +244,10 @@ were measured on 2026-08-10, and both render:
 
 ```bash
 # keep Chrome's sandbox, relax the container's syscall filter
-docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v1.2.0-chromium
+docker run --security-opt seccomp=unconfined ghcr.io/taipanbox/scopyx:v1.3.0-chromium
 
 # keep the container's syscall filter, turn Chrome's sandbox off
-docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v1.2.0-chromium
+docker run -e SCOPYX_CHROMIUM_NO_SANDBOX=1 ghcr.io/taipanbox/scopyx:v1.3.0-chromium
 ```
 
 On Kubernetes the choice is often already made: a namespace at PodSecurity
