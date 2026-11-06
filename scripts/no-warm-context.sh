@@ -56,19 +56,19 @@ code_of() {
 
 # 1. no cookie jar
 while IFS= read -r f; do
-	if code_of "$f" | grep -qE 'cookiejar|Jar:[[:space:]]'; then
+	if grep -qE 'cookiejar|Jar:[[:space:]]' <<<"$(code_of "$f")"; then
 		note "$f gives a client a cookie jar; a session that outlives a fetch is invariant 4"
 	fi
 done <<<"$files"
 
 # 2. the browser profile is per fetch
-if git ls-files 'internal/backend/chromium.go' | grep -q .; then
+if grep -q . <<<"$(git ls-files 'internal/backend/chromium.go')"; then
 	chromium=$(code_of internal/backend/chromium.go)
-	printf '%s' "$chromium" | grep -q 'os.MkdirTemp' ||
+	grep -q 'os.MkdirTemp' <<<"$chromium" ||
 		note "internal/backend/chromium.go does not create a temporary profile directory; a fixed --user-data-dir is a warm browser spelled as a path"
-	printf '%s' "$chromium" | grep -q 'os.RemoveAll' ||
+	grep -q 'os.RemoveAll' <<<"$chromium" ||
 		note "internal/backend/chromium.go does not remove its profile directory; one that outlives the fetch is invariant 4 broken by storage"
-	if printf '%s' "$chromium" | grep -qE '"--user-data-dir=/'; then
+	if grep -qE '"--user-data-dir=/' <<<"$chromium"; then
 		note "internal/backend/chromium.go names a constant --user-data-dir; it must be created per fetch"
 	fi
 else
@@ -76,8 +76,8 @@ else
 fi
 
 # 3. keep-alives stay off where the pin lives
-if git ls-files 'internal/pin/pin.go' | grep -q .; then
-	code_of internal/pin/pin.go | grep -q 'DisableKeepAlives:[[:space:]]*true' ||
+if grep -q . <<<"$(git ls-files 'internal/pin/pin.go')"; then
+	grep -q 'DisableKeepAlives:[[:space:]]*true' <<<"$(code_of internal/pin/pin.go)" ||
 		note "internal/pin no longer disables keep-alives; a pooled connection outlives the check that opened it"
 else
 	note "internal/pin/pin.go is gone, so the transport half of this check measured nothing"
@@ -90,7 +90,7 @@ fi
 # fetch context, not for globals in general, because a global counter is not
 # this invariant's business.
 while IFS= read -r f; do
-	if code_of "$f" | grep -qE '^var[[:space:]]+[A-Za-z_]+[[:space:]]*=?[[:space:]]*&?(http\.Client|http\.Transport|cdp\.Conn)'; then
+	if grep -qE '^var[[:space:]]+[A-Za-z_]+[[:space:]]*=?[[:space:]]*&?(http\.Client|http\.Transport|cdp\.Conn)' <<<"$(code_of "$f")"; then
 		note "$f holds an http client or a browser connection in package-level state, which is a fetch context with the widest possible lifetime"
 	fi
 done <<<"$files"

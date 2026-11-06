@@ -97,7 +97,7 @@ check_confined() {
 	shift 3
 	local allowed=("$@") f pkg ok
 	while IFS= read -r f; do
-		code_of "$f" | grep -q -- "$pattern" || continue
+		grep -q -- "$pattern" <<<"$(code_of "$f")" || continue
 		pkg=$(dirname "$f")
 		ok=0
 		for a in "${allowed[@]}"; do
@@ -118,7 +118,7 @@ check_confined "a net.Dialer" 'net\.Dialer{' \
 	internal/pin internal/browserproxy
 
 while IFS= read -r f; do
-	code_of "$f" | grep -q '"os/exec"' || continue
+	grep -q '"os/exec"' <<<"$(code_of "$f")" || continue
 	pkg=$(dirname "$f")
 	[ "$pkg" = "internal/cdp" ] ||
 		note "$f imports os/exec; only internal/cdp starts a subprocess, and it starts a browser"
