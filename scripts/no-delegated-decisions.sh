@@ -63,19 +63,19 @@ code_of() {
 while IFS= read -r f; do
 	code=$(code_of "$f")
 
-	if printf '%s' "$code" | grep -q 'decide\.Decision{'; then
+	if grep -q 'decide\.Decision{' <<<"$code"; then
 		note "$f constructs a decide.Decision; a backend that can build a verdict can build a different one from the plane above it"
 	fi
-	if printf '%s' "$code" | grep -q 'scopyx/internal/policy"'; then
+	if grep -q 'scopyx/internal/policy"' <<<"$code"; then
 		note "$f imports internal/policy; a backend that can ask the policy plane is a second decision point"
 	fi
-	if printf '%s' "$code" | grep -q 'scopyx/internal/robots"'; then
+	if grep -q 'scopyx/internal/robots"' <<<"$code"; then
 		note "$f imports internal/robots; the site's preference is asked by internal/fetch, after the operator's policy, and that ordering is the point"
 	fi
 done <<<"$files"
 
 # And the other direction: the pure layer cannot depend on what it decides about.
-if go list -f '{{join .Imports "\n"}}' ./internal/decide/ 2>/dev/null | grep -q 'scopyx/internal/backend'; then
+if grep -q 'scopyx/internal/backend' <<<"$(go list -f '{{join .Imports "\n"}}' ./internal/decide/ 2>/dev/null)"; then
 	note "internal/decide imports internal/backend; the pure layer cannot depend on the thing it decides about"
 fi
 

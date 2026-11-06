@@ -104,6 +104,9 @@ jobs:
       - name: every scenario names a test that exists
         run: ./scripts/features-are-bound.sh
 
+      - name: no pipe ends in a grep that leaves early
+        run: ./scripts/no-reader-leaves-a-pipe-early.sh
+
       - name: the door's key in the body stops at the door
         run: ./scripts/meta-key-stops-at-the-door.sh
 

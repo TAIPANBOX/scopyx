@@ -40,7 +40,7 @@ code() { sed -e 's://.*$::' "$1"; }
 
 # 1. The entry's name, in code, anywhere but the file that owns it.
 leaks=$(git ls-files '*.go' | grep -v '_test\.go$' | grep -vxF "$meta" | while IFS= read -r f; do
-	[ -f "$f" ] && code "$f" | grep -qF 'scopyx/key' && printf '%s\n' "$f"
+	[ -f "$f" ] && grep -qF 'scopyx/key' <<<"$(code "$f")" && printf '%s\n' "$f"
 done)
 if [ -n "$leaks" ]; then
 	printf 'FAIL: the entry is named outside internal/mcp/meta.go: %s\n' "$leaks"
@@ -58,7 +58,7 @@ if [ "$list" != 'case "initialize", "tools/list", "notifications/initialized":' 
 	printf 'FAIL: what needs no credential is initialize, tools/list and the initialized notification, and it reads: %s\n' "$list"
 	fail=1
 fi
-if printf '%s\n' "$open" | grep -qE 'req\.ID|env\.ID|\.ID\)'; then
+if grep -qE 'req\.ID|env\.ID|\.ID\)' <<<"$open"; then
 	echo "FAIL: needsNoCredential goes by the absence of an id, and a tools/call with no id still fetches."
 	fail=1
 fi

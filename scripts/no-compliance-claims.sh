@@ -60,7 +60,7 @@ while IFS= read -r f; do
 		[ -n "$line" ] || continue
 		n="${line%%:*}"
 		text="${line#*:}"
-		if printf '%s' "$text" | grep -qiE "$negations"; then
+		if grep -qiE "$negations" <<<"$text"; then
 			continue
 		fi
 		printf 'FAIL %s:%s\n' "$f" "$n"
