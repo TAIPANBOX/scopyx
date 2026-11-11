@@ -57,11 +57,25 @@ jobs:
       # test look identical in a summary line. SCOPYX_REQUIRE_CHROMIUM below
       # turns that skip into a failure, so the day this step breaks, CI says so
       # instead of going quietly green over an untested backend.
+      #
+      # The runner image already ships Google Chrome and a Chromium build, so
+      # this step installs nothing: it finds one under the same names, in the
+      # same order, as internal/cdp/find.go, and prints its version. It used to
+      # run `apt-get install chromium-browser`, which on Ubuntu is a
+      # transitional package that installs the snap; on 2026-11-11 the runners
+      # could not reach the snap store for hours, and every run waited out
+      # snapd's 30 minute retry and failed.
       - name: a browser for the rendering backend
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq chromium-browser || sudo snap install chromium
-          command -v chromium || command -v chromium-browser
+          for n in chromium chromium-browser google-chrome google-chrome-stable; do
+            if p=$(command -v "$n"); then
+              echo "$n: $p"
+              "$p" --version
+              exit 0
+            fi
+          done
+          echo "no browser on the runner image: the chromium cases would skip" >&2
+          exit 1
 
       - name: go test -race
         env:
