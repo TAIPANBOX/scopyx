@@ -60,7 +60,12 @@ func TestAnInvalidWaitForSelectorFetchesNothingAndJournalsNothing(t *testing.T) 
 	}))
 	defer doc.Close()
 
-	ch, err := backend.NewChromium(exe, 1<<20, 6*time.Second)
+	// 40 seconds, as the other browser tests here: the budget covers the
+	// browser's start, and 6 seconds ran out on the CI runner under -race
+	// with Google Chrome (2026-11-11, "context deadline exceeded"). A longer
+	// budget weakens nothing below: a selector that is not caught still fails
+	// the error and hit-count checks, only later.
+	ch, err := backend.NewChromium(exe, 1<<20, 40*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
