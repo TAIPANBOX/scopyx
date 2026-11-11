@@ -50,7 +50,7 @@ func TestAnInvalidWaitForSelectorFetchesNothingAndJournalsNothing(t *testing.T) 
 	// Its own TMPDIR, same reasoning as TestARefusedScreenshotStillJournalsTheEgressThatHappened:
 	// go test ./... runs packages in parallel and two browser tests sharing
 	// one temp dir have collided on CI before (subresource_test.go).
-	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("TMPDIR", browserTempDir(t))
 
 	var hits atomic.Int64
 	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
