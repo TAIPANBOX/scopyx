@@ -228,7 +228,7 @@ func TestASubresourceThePolicyPlaneRefusesNeverReachesItsServer(t *testing.T) {
 	// directories in the shared temp dir before and after a fetch; a profile
 	// this test's browser holds open at that moment reads there as one that
 	// outlived a fetch. Seen on CI the day this test was added.
-	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("TMPDIR", browserTempDir(t))
 
 	ch, err := backend.NewChromium(exe, 1<<20, 40*time.Second)
 	if err != nil {
