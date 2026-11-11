@@ -44,7 +44,7 @@ func TestARefusedScreenshotStillJournalsTheEgressThatHappened(t *testing.T) {
 	// count before. This test does not count profile directories, but it
 	// gets a TMPDIR of its own on the same principle rather than trusting
 	// that omission is safe.
-	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("TMPDIR", browserTempDir(t))
 
 	doc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
