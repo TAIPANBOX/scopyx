@@ -59,18 +59,22 @@ jobs:
       # instead of going quietly green over an untested backend.
       #
       # The runner image already ships Google Chrome and a Chromium build, so
-      # this step installs nothing: it finds one under the same names, in the
-      # same order, as internal/cdp/find.go, and prints its version. It used to
-      # run `apt-get install chromium-browser`, which on Ubuntu is a
-      # transitional package that installs the snap; on 2026-11-11 the runners
-      # could not reach the snap store for hours, and every run waited out
-      # snapd's 30 minute retry and failed.
+      # this step installs nothing. It prefers Google Chrome, the image's
+      # stable release, and names it in SCOPYX_CHROMIUM for the test step: the
+      # image's Chromium is a snapshot build, and on 2026-11-11 it crashed in
+      # three cmd/scopyx cases that passed on the snap's release build on
+      # 2026-11-08. It used to run
+      # `apt-get install chromium-browser`, which on Ubuntu is a transitional
+      # package that installs the snap; that day the runners could not reach
+      # the snap store for hours, and every run waited out snapd's 30 minute
+      # retry and failed.
       - name: a browser for the rendering backend
         run: |
-          for n in chromium chromium-browser google-chrome google-chrome-stable; do
+          for n in google-chrome google-chrome-stable chromium chromium-browser; do
             if p=$(command -v "$n"); then
               echo "$n: $p"
               "$p" --version
+              echo "SCOPYX_CHROMIUM=$p" >> "$GITHUB_ENV"
               exit 0
             fi
           done
