@@ -71,7 +71,10 @@ func pipeBrowser(mode string) int {
 		}
 		if err != nil {
 			if mode == "stubborn" {
-				select {} // a browser that does not notice its pipe went away
+				// A browser that does not notice its pipe went away. Sleep,
+				// not an empty select: the runtime kills a process whose every
+				// goroutine is blocked, which would exit on its own.
+				time.Sleep(time.Hour)
 			}
 			return 0
 		}
@@ -207,10 +210,12 @@ func TestCloseKillsTheBrowserAndRefusesEverythingAfter(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Errorf("a second Close must be a no-op, got %v", err)
 	}
-	if err := c.Call(bounded(t), "", "Anything", nil, nil); err == nil || !strings.Contains(err.Error(), "closed") {
+	// The connection's own refusal, not whatever writing to a closed file says.
+	const refused = "the browser connection is closed"
+	if err := c.Call(bounded(t), "", "Anything", nil, nil); err == nil || !strings.Contains(err.Error(), refused) {
 		t.Errorf("a call after Close must be refused as closed, got %v", err)
 	}
-	if err := c.Send("", "Anything", nil); err == nil || !strings.Contains(err.Error(), "closed") {
+	if err := c.Send("", "Anything", nil); err == nil || !strings.Contains(err.Error(), refused) {
 		t.Errorf("a send after Close must be refused as closed, got %v", err)
 	}
 }
