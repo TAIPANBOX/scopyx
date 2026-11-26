@@ -70,6 +70,19 @@ func main() {
 }
 
 func run(log *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, log, net.Listen)
+}
+
+// serve is the whole process between reading its environment and exiting.
+//
+// The listener and the stop signal are arguments, and that is the only
+// difference from a function that bound SCOPYX_ADDR and waited for SIGTERM
+// itself: `run` passes exactly those. Everything it is configured with still
+// comes from the environment, so a test exercises the same reading of it an
+// operator gets.
+func serve(ctx context.Context, log *slog.Logger, listen func(network, address string) (net.Listener, error)) error {
 	mcp.Version = version
 
 	addr := env("SCOPYX_ADDR", defaultAddr)
@@ -214,23 +227,25 @@ func run(log *slog.Logger) error {
 			"every other backend is metered from the first fetch.")
 	}
 
+	ln, err := listen("tcp", addr)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	select {
 	case err := <-errc:
 		return err
-	case <-stop:
+	case <-ctx.Done():
 	}
 
 	log.Info("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 	defer cancel()
 	if skipped, failed := journal.Counts(); skipped > 0 || failed > 0 {
 		// Reported at exit rather than kept private. Each number means "this
@@ -238,7 +253,7 @@ func run(log *slog.Logger) error {
 		// no way to know.
 		log.Warn("the record is incomplete", "skipped_no_agent_id", skipped, "write_failures", failed)
 	}
-	return srv.Shutdown(ctx)
+	return srv.Shutdown(shutdownCtx)
 }
 
 // chooseBackend reads SCOPYX_BACKEND.
