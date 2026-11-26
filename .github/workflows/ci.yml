@@ -94,8 +94,20 @@ jobs:
           # keeps the sandbox. Here the isolation is the runner itself, which
           # is destroyed after the job.
           SCOPYX_CHROMIUM_NO_SANDBOX: "1"
-        run: go test -race ./...
-
+        run: go test -race -coverprofile="$RUNNER_TEMP/coverage.out" -covermode=atomic ./...
+      # Total coverage of the run above against .coverage-floor, printed in
+      # the job summary. The profile lives in RUNNER_TEMP so the tree stays
+      # clean for gates-have-teeth.sh.
+      - name: coverage is not below the floor
+        run: |
+          go tool cover -func="$RUNNER_TEMP/coverage.out" > "$RUNNER_TEMP/coverage.txt"
+          ./scripts/coverage-floor.sh check "$RUNNER_TEMP/coverage.txt"
+      - name: the coverage floor only rises
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          git show FETCH_HEAD:.coverage-floor > "$RUNNER_TEMP/base-floor" 2>/dev/null || rm -f "$RUNNER_TEMP/base-floor"
+          ./scripts/coverage-floor.sh ratchet "$RUNNER_TEMP/base-floor"
       # The architectural gates. They run here as well as locally because a
       # gate that only runs on one machine is a gate that does not run.
       - name: the tool accepts no caller headers
