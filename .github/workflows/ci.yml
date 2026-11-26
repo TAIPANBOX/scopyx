@@ -108,6 +108,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           git show FETCH_HEAD:.coverage-floor > "$RUNNER_TEMP/base-floor" 2>/dev/null || rm -f "$RUNNER_TEMP/base-floor"
           ./scripts/coverage-floor.sh ratchet "$RUNNER_TEMP/base-floor"
+
       # The architectural gates. They run here as well as locally because a
       # gate that only runs on one machine is a gate that does not run.
       - name: the tool accepts no caller headers
