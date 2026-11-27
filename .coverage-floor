@@ -2,5 +2,5 @@
 # Set to the measured value minus one point; raise it, never lower it
 # (scripts/coverage-floor.sh check / ratchet).
 # target: 90 (the goal the floor is raised towards; reported, not gated)
-# Set 2026-11-26 from the first CI measurement, 79.8%.
-78.8
+# Raised 2026-11-26 to measured 91.4% minus one point (first CI measurement was 79.8%).
+90.4

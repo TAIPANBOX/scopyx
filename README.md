@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml/badge.svg)](https://github.com/TAIPANBOX/scopyx/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/go-1.27-00ADD8.svg)
-![tests](https://img.shields.io/badge/tests-241-brightgreen.svg)
+![tests](https://img.shields.io/badge/tests-275-brightgreen.svg)
 ![deps](https://img.shields.io/badge/direct%20dependencies-1-blue.svg)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 
@@ -36,7 +36,7 @@ fetcher you already use, and adds the four things that were missing.
 If a change would make the fetch better rather than the fetch more *governed*,
 it belongs in a backend somebody else maintains.
 
-<!-- tests: `grep -rh '^func Test' --include='*_test.go' . | wc -l`, 241 on 2026-11-05 -->
+<!-- tests: `go test ./... -list .*` test functions (scripts/readme-numbers.sh), 275 on 2026-11-26 -->
 
 <div align="center">
 
