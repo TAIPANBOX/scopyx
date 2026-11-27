@@ -111,7 +111,7 @@ func startServe(t *testing.T) *running {
 		cancel()
 		select {
 		case <-r.done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(stopWait):
 		}
 	})
 	waitForAnswer(t, r.url)
@@ -135,14 +135,22 @@ func waitForAnswer(t *testing.T, url string) {
 	t.Fatalf("nothing answered on the listener serve was given, at %s", url)
 }
 
-// stop cancels serve and returns what it returned.
+// stopWait bounds how long a test waits for serve to return once cancelled.
+// It must outlast serve's own shutdown timeout: net/http's Shutdown waits up
+// to five seconds for a connection that has not sent a request yet, so a
+// bound of exactly five seconds raced it and failed now and then in CI.
+const stopWait = defaultShutdownTimeout + 5*time.Second
+
+// stop cancels serve and returns what it returned. Idle client connections are
+// closed first, so a spare dial of the shared client does not hold Shutdown.
 func (r *running) stop(t *testing.T) error {
 	t.Helper()
+	client.CloseIdleConnections()
 	r.cancel()
 	select {
 	case <-r.done:
 		return r.err
-	case <-time.After(5 * time.Second):
+	case <-time.After(stopWait):
 		t.Fatal("serve did not return after it was told to stop")
 		return nil
 	}
@@ -396,5 +404,26 @@ func TestAListenerThatFailsWhileServingEndsTheProcessWithTheError(t *testing.T) 
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("serve kept waiting after its listener failed")
+	}
+}
+
+// A client that opened a connection and has not sent a request yet (an HTTP
+// transport's spare dial, a health checker, a slow peer) holds http.Server's
+// Shutdown for up to five seconds: net/http only treats a new connection as
+// idle once it is that old. Stop must wait past that, not race it.
+func TestAStopWaitsOutAConnectionThatNeverSentARequest(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("SCOPYX_WARDRYX", fakePolicyPlane(t))
+
+	r := startServe(t)
+	conn, err := net.Dial("tcp", strings.TrimPrefix(r.url, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	time.Sleep(50 * time.Millisecond) // let the server accept it
+
+	if err := r.stop(t); err != nil {
+		t.Errorf("a requested stop must return nil, got %v", err)
 	}
 }
