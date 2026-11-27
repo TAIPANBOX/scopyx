@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/netip"
 	"os"
@@ -127,6 +128,26 @@ func TestTheSystemResolverAnswersForANameAndRefusesOneThatCannotExist(t *testing
 	}
 	if addrs != nil {
 		t.Errorf("a failed lookup must return no addresses, got %v", addrs)
+	}
+}
+
+// SCOPYX_BACKEND=chromium with a SCOPYX_CHROMIUM that names nothing refuses to
+// start, and the error names the path, instead of starting and failing on the
+// first fetch.
+func TestTheChromiumBackendRefusesToStartWithAMissingBrowserPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-chrome")
+	t.Setenv("SCOPYX_BACKEND", "chromium")
+	t.Setenv("SCOPYX_CHROMIUM", missing)
+
+	b, err := chooseBackend(&http.Client{})
+	if err == nil {
+		t.Fatalf("a missing browser path must refuse startup, built %T", b)
+	}
+	if !errors.Is(err, backend.ErrNoBrowser) {
+		t.Errorf("want backend.ErrNoBrowser, got %v", err)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("the startup error must name %q, got %q", missing, err)
 	}
 }
 

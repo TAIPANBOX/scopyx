@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -266,6 +267,26 @@ func TestAMissingBrowserIsRefusedAtConstructionAndSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SCOPYX_BACKEND=passthrough") {
 		t.Errorf("the message must name the way out, got %q", err)
+	}
+}
+
+// A browser path the operator named is checked at construction too, not only
+// one found by searching. A path that is not there, or is a directory, used to
+// build a backend that started cleanly and failed on the first fetch with an
+// error about launching a process.
+func TestAConfiguredBrowserPathThatIsNotAFileIsRefusedAtConstruction(t *testing.T) {
+	dir := t.TempDir()
+	for _, exe := range []string{filepath.Join(dir, "no-such-chrome"), dir} {
+		_, err := NewChromium(exe, 1<<20, time.Second)
+		if err == nil {
+			t.Fatalf("NewChromium(%q) must be refused", exe)
+		}
+		if !errors.Is(err, ErrNoBrowser) {
+			t.Errorf("NewChromium(%q): want ErrNoBrowser, got %v", exe, err)
+		}
+		if !strings.Contains(err.Error(), exe) {
+			t.Errorf("NewChromium(%q): the message must name the path, got %q", exe, err)
+		}
 	}
 }
 
