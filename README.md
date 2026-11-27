@@ -142,7 +142,7 @@ with no subject, and is refused with a reason saying exactly that.
 | `SCOPYX_EXTERNAL_ENDPOINT` | none | your own fetching service, for `external` |
 | `SCOPYX_EXTERNAL_KEY` | none | your credential for your own service |
 | `SCOPYX_EXTERNAL_LABEL` | `service` | the label in the backend's name, `external:<label>` |
-| `SCOPYX_CHROMIUM` | found on PATH | path to the browser, for `chromium` |
+| `SCOPYX_CHROMIUM` | found on PATH | path to the browser, for `chromium`; a path that is not a file refuses startup |
 | `SCOPYX_CHROMIUM_NO_SANDBOX` | unset | turns off the browser's own sandbox, see below |
 | `SCOPYX_EVENTS` | none (no record) | path to this plane's own journal |
 | `SCOPYX_RETAIN` | none | `payload` to keep full URLs, see below |
