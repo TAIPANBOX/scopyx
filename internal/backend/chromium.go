@@ -112,6 +112,12 @@ func NewChromium(exe string, maxBodyBytes int64, timeout time.Duration) (*Chromi
 				ErrNoBrowser, strings.Join(cdp.Candidates, ", "))
 		}
 		exe = found
+	} else if !isFile(exe) {
+		// A path the operator named is checked here as well, so the error
+		// names the missing browser at startup rather than surfacing as a
+		// launch failure on the first fetch.
+		return nil, fmt.Errorf("%w: SCOPYX_CHROMIUM=%s is not a file. This backend drives "+
+			"a browser the operator installs; nothing is downloaded", ErrNoBrowser, exe)
 	}
 	if maxBodyBytes <= 0 {
 		maxBodyBytes = 32 << 20
@@ -120,6 +126,15 @@ func NewChromium(exe string, maxBodyBytes int64, timeout time.Duration) (*Chromi
 		timeout = 45 * time.Second
 	}
 	return &Chromium{Exe: exe, MaxBodyBytes: maxBodyBytes, Timeout: timeout}, nil
+}
+
+// isFile reports whether path names something that is there and is not a
+// directory, the same test cdp.Find applies to SCOPYX_CHROMIUM.
+func isFile(path string) bool {
+	// #nosec G304 G703 -- operator configuration, invariant 12: the path the
+	// operator named for the browser this plane drives.
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
 }
 
 func (c *Chromium) Name() string { return "chromium" }
